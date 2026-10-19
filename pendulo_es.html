@@ -1,0 +1,2757 @@
+<!doctype html>
+<!--
+  Pendulo4 (web version): the broomstick game.
+  A port of Pendulo4.java to a single HTML file (no dependencies): same physics (RK4),
+  fuzzy controller (225 rules), fuzzy actor-critic learning, expert with human reflexes,
+  colors, light/dark themes, sliders, shortcuts and charts. Open it directly in a browser.
+-->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pendulo4 · Equilibrando el palo de escoba</title>
+<meta name="description" content="Péndulo invertido con lógica fuzzy y aprendizaje por refuerzo.">
+<style>
+  :root {
+    --sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Inter, Roboto, system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --bg-top: #070B1A;
+    --panel: #0D1327;
+    --panel-border: #232C4C;
+    --field: #161E3B;
+    --text: #E6EAF5;
+    --muted: #8A94B8;
+    --cyan: #38BDF8;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg-top);
+    color: var(--text);
+    font-family: var(--sans);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app { display: flex; height: 100vh; height: 100dvh; }
+  #stage { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  #scene { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-select: none; touch-action: manipulation; outline: none; }
+
+  #sidebar {
+    flex: 0 0 336px;
+    width: 336px;
+    padding: 14px 22px 14px 23px;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-border);
+    overflow-y: auto;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .header { display: flex; align-items: flex-start; height: 67px; gap: 0; }
+  .header .logo { width: 53px; height: 53px; margin-top: 4px; flex: none; }
+  .header .titles { margin-left: 16px; flex: 1; min-width: 0; }
+  .header h1 { margin: 0; font-size: 21px; font-weight: 700; line-height: 1; padding-top: 11px; white-space: nowrap; }
+  .header .subtitle { margin-top: 10px; font-size: 14.4px; color: var(--muted); white-space: nowrap; }
+  .theme-toggle { width: 29px; height: 29px; margin-top: 4px; padding: 0; border: 0; background: none; cursor: pointer; flex: none; }
+  .theme-toggle canvas { display: block; width: 29px; height: 29px; }
+
+  .section-title {
+    display: flex; align-items: center; gap: 12px;
+    height: 26px; margin-top: 8px; padding-top: 5px;
+    font-size: 12.6px; font-weight: 700; letter-spacing: 0.14em; color: var(--muted);
+  }
+  .section-title::after { content: ""; flex: 1; height: 1px; background: var(--panel-border); }
+
+  .segmented {
+    display: grid; grid-template-columns: 1fr 1fr;
+    height: 38px; margin-top: 6px; padding: 3px; gap: 6px;
+    background: var(--field); border-radius: 6px;
+  }
+  .segmented button {
+    border: 0; border-radius: 4.5px; cursor: pointer;
+    font: 700 13.8px var(--sans); color: var(--muted); background: transparent;
+  }
+  .segmented button:hover { background: var(--seg-hover); }
+  .segmented button.selected { background: var(--seg-accent); color: var(--seg-text); }
+  .mode-description { margin-top: 6px; font-size: 12.6px; line-height: 1.3; color: var(--muted); }
+
+  .slider { margin-top: 2px; }
+  .slider.first { margin-top: 4px; }
+  .slider .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .slider .name { font-size: 15.6px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .slider .value { font: 700 14.4px var(--mono); white-space: nowrap; }
+  .slider canvas { display: block; width: 100%; height: 23px; cursor: pointer; touch-action: none; }
+
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    height: 48px; width: 100%; padding: 0 4px;
+    border-radius: 6px; cursor: pointer;
+    font: 700 14.4px var(--sans); color: var(--fg);
+    white-space: nowrap; overflow: hidden;
+  }
+  .btn canvas { width: 15px; height: 15px; flex: none; }
+  .btn.primary { border: 0; background: linear-gradient(var(--top), var(--bottom)); }
+  .btn.primary:hover:not(:disabled) { background: linear-gradient(var(--top-hover), var(--bottom)); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.24); }
+  .btn.primary:active:not(:disabled) { background: linear-gradient(var(--bottom-pressed), var(--top)); }
+  .btn.secondary { border: 1.2px solid var(--border); background: var(--bg); }
+  .btn.secondary:hover:not(:disabled) { border-color: var(--border-hover); background: var(--bg-hover); }
+  .btn.secondary:active:not(:disabled) { background: var(--bg-pressed); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  #btForget { margin-top: 8px; }
+  .buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+
+  /* Narrow windows: the scene on top, the controls below it. */
+  @media (max-width: 999px) {
+    body { overflow: auto; }
+    #app { flex-direction: column; height: auto; }
+    #stage { flex: none; height: var(--stage-height, 70vh); }
+    #sidebar {
+      flex: none; width: auto;
+      border-left: 0; border-top: 1px solid var(--panel-border);
+      padding: 14px 16px 28px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      column-gap: 32px; align-content: start; overflow: visible;
+    }
+    .header { grid-column: 1 / -1; }
+    .group-simulation { order: 1; }
+    .group-controller, .group-learning, .group-environment { order: 2; }
+  }
+  @media (max-width: 380px) {
+    .header h1 { font-size: 18px; }
+    .header .subtitle { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <main id="stage"><canvas id="scene" tabindex="0" aria-label="Simulación del péndulo invertido"></canvas></main>
+  <aside id="sidebar">
+    <div class="header">
+      <canvas class="logo" id="logo" width="53" height="53" aria-hidden="true"></canvas>
+      <div class="titles">
+        <h1>Péndulo Invertido</h1>
+        <div class="subtitle">fuzzy &nbsp;·&nbsp; aprendizaje &nbsp;·&nbsp; RK4</div>
+      </div>
+      <button class="theme-toggle" id="themeToggle" tabindex="-1"><canvas id="themeIcon" width="29" height="29"></canvas></button>
+    </div>
+
+    <section class="group-controller">
+      <div class="section-title">CONTROLADOR</div>
+      <div class="segmented" id="modeControl">
+        <button tabindex="-1" data-index="0">Aprendiz</button>
+        <button tabindex="-1" data-index="1">Experto</button>
+      </div>
+      <div class="mode-description" id="modeDescription"></div>
+      <div id="skillSlot"></div>
+    </section>
+
+    <section class="group-learning">
+      <div class="section-title">APRENDIZAJE</div>
+      <div id="learningSlot"></div>
+      <button class="btn secondary" id="btForget" tabindex="-1"></button>
+    </section>
+
+    <section class="group-environment">
+      <div class="section-title">ENTORNO</div>
+      <div id="environmentSlot"></div>
+    </section>
+
+    <section class="group-simulation">
+      <div class="section-title">SIMULACIÓN</div>
+      <div class="buttons">
+        <button class="btn primary" id="btStart" tabindex="-1"></button>
+        <button class="btn secondary" id="btStop" tabindex="-1"></button>
+        <button class="btn secondary" id="btReset" tabindex="-1"></button>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+// Constants (same values as Pendulo4.java)
+// ---------------------------------------------------------------------------
+
+const SIMULATION_TICK_MS = 4;   // like the Java thread's sleep between bursts of steps
+const MAX_FORCE_NEWTONS = 10;
+const TIME_STEP = 0.005;        // s
+const MAX_CATCH_UP = 0.1;       // s, avoids a "spiral of death"
+
+const PIXELS_PER_METER = 200;
+const CART_W = 164;
+const CART_H = 60;
+const WHEEL_R = 22;
+const BOB_R = 16;
+const HALF_POLE_LENGTH = 0.5;   // m
+const POLE_PX = 2 * HALF_POLE_LENGTH * PIXELS_PER_METER;
+
+const MAX_FLING_CART = 5;       // m/s
+const MAX_FLING_POLE = 25;      // rad/s
+const STAR_COUNT = 170;
+const HUD_MARGIN = 16;
+const FONT_SCALE = 1.2;
+
+const HIT_NONE = 0;
+const HIT_CART = 1;
+const HIT_BOB = 2;
+
+const LEARN = 'LEARN';
+const EXPERT = 'EXPERT';
+const MODES = [LEARN, EXPERT];
+const FELL = 'FELL';
+const HIT_WALL = 'HIT_WALL';
+const GOAL = 'GOAL';
+
+/** Scales a layout size designed for 1x fonts, so cards and panels grow with the text. */
+function ui(base) {
+  return Math.round(base * FONT_SCALE);
+}
+
+// ---------------------------------------------------------------------------
+// Formatting (Spanish: decimal comma)
+// ---------------------------------------------------------------------------
+
+function num(value, digits) {
+  return value.toFixed(digits).replace('.', ',');
+}
+
+function signed(value, digits) {
+  const text = num(value, digits);
+  return text.startsWith('-') ? text : '+' + text;
+}
+
+function compact(value) {
+  if (value < 1000) return String(value);
+  if (value < 1e6) return num(value / 1e3, 1) + 'k';
+  return num(value / 1e6, 1) + 'M';
+}
+
+function formatDuration(seconds, precise) {
+  if (seconds < 120) return precise ? num(seconds, 1) + ' s' : num(seconds, 0) + 's';
+  if (seconds < 3600) return precise ? num(seconds / 60, 1) + ' min' : num(seconds / 60, 0) + ' min';
+  return num(seconds / 3600, 1) + ' h';
+}
+
+function normalizeAngle(angle) {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function toRadians(deg) {
+  return deg * Math.PI / 180;
+}
+
+function toDegrees(rad) {
+  return rad * 180 / Math.PI;
+}
+
+function gaussian() {
+  let u = 0;
+  while (u === 0) u = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+function randomBoolean() {
+  return Math.random() < 0.5;
+}
+
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+
+function hex(value) {
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+const WHITE = [255, 255, 255];
+const BLACK = [0, 0, 0];
+
+/** CSS color from [r, g, b] (alpha 0..255 like java.awt.Color). */
+function rgba(color, alpha) {
+  const a = alpha === undefined ? (color.length > 3 ? color[3] : 255) : alpha;
+  return `rgba(${color[0]},${color[1]},${color[2]},${Math.max(0, Math.min(255, a)) / 255})`;
+}
+
+function mix(a, b, t) {
+  const k = Math.max(0, Math.min(1, t));
+  return [0, 1, 2].map(i => Math.round(a[i] + (b[i] - a[i]) * k));
+}
+
+const T = { dark: true, version: 0 };
+
+function applyPalette(dark) {
+  T.dark = dark;
+  T.version++;
+  T.CART_TOP = hex(0x5B7CFA);
+  T.CART_BOTTOM = hex(0x26338A);
+  if (dark) {
+    Object.assign(T, {
+      BG_TOP: hex(0x070B1A), BG_MID: hex(0x121B3D), FLOOR_TOP: hex(0x0D1430), FLOOR_BOTTOM: hex(0x04060E),
+      PANEL: hex(0x0D1327), PANEL_BORDER: hex(0x232C4C), FIELD: hex(0x161E3B), CARD: [14, 20, 42, 205],
+      TEXT: hex(0xE6EAF5), MUTED: hex(0x8A94B8), CYAN: hex(0x38BDF8), TEAL: hex(0x2DD4BF),
+      PINK: hex(0xF472B6), VIOLET: hex(0x818CF8), AMBER: hex(0xFBBF24), ROSE: hex(0xFB7185),
+      GREEN: hex(0x4ADE80), INK: WHITE, RAIL: hex(0x7DD3FC), GRID: hex(0x38BDF8),
+    });
+  } else {
+    Object.assign(T, {
+      BG_TOP: hex(0xF5F8FD), BG_MID: hex(0xDCE6F6), FLOOR_TOP: hex(0xD3DEEE), FLOOR_BOTTOM: hex(0xB4C3DB),
+      PANEL: hex(0xFFFFFF), PANEL_BORDER: hex(0xD8DFEB), FIELD: hex(0xE2E8F2), CARD: [255, 255, 255, 220],
+      TEXT: hex(0x1C2436), MUTED: hex(0x5E6A84), CYAN: hex(0x0284C7), TEAL: hex(0x0D9488),
+      PINK: hex(0xDB2777), VIOLET: hex(0x4F46E5), AMBER: hex(0xD97706), ROSE: hex(0xE11D48),
+      GREEN: hex(0x16A34A), INK: hex(0x0F172A), RAIL: hex(0x2563EB), GRID: hex(0x3B5B8C),
+    });
+  }
+}
+
+// The last chosen theme is remembered between runs (browser storage).
+const THEME_KEY = 'pendulo4.theme';
+
+function loadDarkTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) !== 'light';
+  } catch (e) {
+    return true;
+  }
+}
+
+function saveTheme(dark) {
+  try {
+    localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
+  } catch (e) {
+    // Not being able to save the preference must never break the app.
+  }
+}
+
+applyPalette(loadDarkTheme()); // components read the palette as soon as they are built
+
+const SANS = getComputedStyle(document.documentElement).getPropertyValue('--sans').trim() || 'sans-serif';
+const MONO = getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace';
+const HAS_LETTER_SPACING = 'letterSpacing' in CanvasRenderingContext2D.prototype;
+
+/** Sets a canvas font; sizes are nominal (like Theme.font) and get FONT_SCALE. */
+function setFont(g, family, bold, size, tracking) {
+  const px = size * FONT_SCALE;
+  g.font = `${bold ? 700 : 400} ${px}px ${family}`;
+  if (HAS_LETTER_SPACING) g.letterSpacing = tracking ? `${tracking * px}px` : '0px';
+}
+
+// ---------------------------------------------------------------------------
+// Canvas helpers
+// ---------------------------------------------------------------------------
+
+function circlePath(g, cx, cy, r) {
+  g.beginPath();
+  g.arc(cx, cy, Math.max(0, r), 0, Math.PI * 2);
+}
+
+function fillCircle(g, cx, cy, r, style) {
+  circlePath(g, cx, cy, r);
+  g.fillStyle = style;
+  g.fill();
+}
+
+/** Rounded rectangle; arc is the corner diameter, as in java.awt.geom.RoundRectangle2D. */
+function roundRectPath(g, x, y, w, h, arc) {
+  const r = Math.max(0, Math.min(arc / 2, w / 2, h / 2));
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.lineTo(x + w - r, y);
+  g.arcTo(x + w, y, x + w, y + r, r);
+  g.lineTo(x + w, y + h - r);
+  g.arcTo(x + w, y + h, x + w - r, y + h, r);
+  g.lineTo(x + r, y + h);
+  g.arcTo(x, y + h, x, y + h - r, r);
+  g.lineTo(x, y + r);
+  g.arcTo(x, y, x + r, y, r);
+  g.closePath();
+}
+
+function strokeLine(g, x0, y0, x1, y1) {
+  g.beginPath();
+  g.moveTo(x0, y0);
+  g.lineTo(x1, y1);
+  g.stroke();
+}
+
+function linear(g, x0, y0, c0, x1, y1, c1) {
+  const gradient = g.createLinearGradient(x0, y0, x1, y1);
+  gradient.addColorStop(0, c0);
+  gradient.addColorStop(1, c1);
+  return gradient;
+}
+
+function radial(g, cx, cy, r, stops) {
+  const gradient = g.createRadialGradient(cx, cy, 0, cx, cy, Math.max(0.001, r));
+  for (const [fraction, color] of stops) gradient.addColorStop(fraction, color);
+  return gradient;
+}
+
+function setStroke(g, width, round, dash, dashOffset) {
+  g.lineWidth = width;
+  g.lineCap = round ? 'round' : 'butt';
+  g.lineJoin = 'round';
+  g.setLineDash(dash || []);
+  g.lineDashOffset = dashOffset || 0;
+}
+
+function textWidth(g, text) {
+  return g.measureText(text).width;
+}
+
+function drawRight(g, text, right, baseline) {
+  g.fillText(text, right - textWidth(g, text), baseline);
+}
+
+/** Baseline that centers the current font vertically in a box (like baseline(fm, top, h)). */
+function baselineIn(g, top, height) {
+  const m = g.measureText('Hg');
+  const ascent = m.fontBoundingBoxAscent !== undefined ? m.fontBoundingBoxAscent : m.actualBoundingBoxAscent;
+  const descent = m.fontBoundingBoxDescent !== undefined ? m.fontBoundingBoxDescent : m.actualBoundingBoxDescent;
+  return top + (height - (ascent + descent)) / 2 + ascent;
+}
+
+function bobColor(theta) {
+  const upright = (1 + Math.cos(theta)) / 2; // 1 = upright, 0 = hanging down
+  return mix(T.PINK, T.TEAL, upright);
+}
+
+function paintLogo(g, x, y, size) {
+  roundRectPath(g, x, y, size, size, size * 0.32);
+  g.fillStyle = linear(g, x, y, rgba(T.VIOLET), x + size, y + size, rgba(T.TEAL));
+  g.fill();
+
+  const cx = x + size * 0.45;
+  const base = y + size * 0.72;
+  const tipX = cx + size * 0.2;
+  const tipY = y + size * 0.25;
+  const white = 'rgba(255,255,255,0.94)';
+  roundRectPath(g, cx - size * 0.22, base - size * 0.05, size * 0.44, size * 0.14, size * 0.08);
+  g.fillStyle = white;
+  g.fill();
+  setStroke(g, size * 0.06, true);
+  g.strokeStyle = white;
+  strokeLine(g, cx, base - size * 0.03, tipX, tipY);
+  fillCircle(g, tipX, tipY, size * 0.085, white);
+}
+
+/** Prepares a small canvas for crisp drawing at the screen's pixel density. */
+function hiDpi(canvas, width, height) {
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const g = canvas.getContext('2d');
+  g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  g.clearRect(0, 0, width, height);
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy logic and learning
+// ---------------------------------------------------------------------------
+
+/**
+ * Fuzzy partition and rule base (zero-order Takagi-Sugeno).
+ * Inputs: pole angle and angular velocity (5 triangular sets each) and cart position and
+ * velocity (3 sets each): 5 x 5 x 3 x 3 = 225 rules "IF ... THEN force = w".
+ */
+const FuzzyRules = (() => {
+  const THETA_SCALE = toRadians(12); // rad
+  const OMEGA_SCALE = 2.0;           // rad/s
+  const X_SCALE = 2.0;               // m
+  const V_SCALE = 1.5;               // m/s
+  const SCALES = [THETA_SCALE, OMEGA_SCALE, X_SCALE, V_SCALE];
+  const FIVE_SETS = [-1, -0.5, 0, 0.5, 1];
+  const THREE_SETS = [-1, 0, 1];
+  const CENTERS = [FIVE_SETS, FIVE_SETS, THREE_SETS, THREE_SETS];
+  const RULES = 5 * 5 * 3 * 3;
+  const MIRROR = new Int32Array(RULES);
+  const EXPERT_WEIGHTS = new Float64Array(RULES);
+  const mu = CENTERS.map(c => new Float64Array(c.length));
+
+  function clampForce(force) {
+    return Math.max(-MAX_FORCE_NEWTONS, Math.min(MAX_FORCE_NEWTONS, force));
+  }
+
+  // Expert rule base from control theory: F = 40 theta + 8 omega + 2 x + 4 v at each rule center.
+  let r = 0;
+  for (let a = 0; a < 5; a++) {
+    for (let b = 0; b < 5; b++) {
+      for (let c = 0; c < 3; c++) {
+        for (let d = 0; d < 3; d++) {
+          MIRROR[r] = (((4 - a) * 5 + (4 - b)) * 3 + (2 - c)) * 3 + (2 - d);
+          const theta = FIVE_SETS[a] * THETA_SCALE;
+          const omega = FIVE_SETS[b] * OMEGA_SCALE;
+          const x = THREE_SETS[c] * X_SCALE;
+          const v = THREE_SETS[d] * V_SCALE;
+          EXPERT_WEIGHTS[r] = clampForce(40 * theta + 8 * omega + 2 * x + 4 * v);
+          r++;
+        }
+      }
+    }
+  }
+
+  /** Triangular memberships of a normalized input; they always add up to 1. */
+  function memberships(u, centers, out) {
+    const spacing = centers[1] - centers[0];
+    const clamped = Math.max(centers[0], Math.min(centers[centers.length - 1], u));
+    for (let k = 0; k < centers.length; k++) {
+      out[k] = Math.max(0, 1 - Math.abs(clamped - centers[k]) / spacing);
+    }
+  }
+
+  /** How strongly each rule fires for the state [theta, omega, x, v] (product AND). */
+  function firing(state, phi) {
+    for (let i = 0; i < 4; i++) memberships(state[i] / SCALES[i], CENTERS[i], mu[i]);
+    let k = 0;
+    for (let a = 0; a < 5; a++) {
+      for (let b = 0; b < 5; b++) {
+        const ab = mu[0][a] * mu[1][b];
+        for (let c = 0; c < 3; c++) {
+          const abc = ab * mu[2][c];
+          for (let d = 0; d < 3; d++) phi[k++] = abc * mu[3][d];
+        }
+      }
+    }
+  }
+
+  function dot(a, b) {
+    let sum = 0;
+    for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+    return sum;
+  }
+
+  function infer(ruleForces, state, phi) {
+    firing(state, phi);
+    return dot(ruleForces, phi);
+  }
+
+  const expertPhi = new Float64Array(RULES);
+  function expertForce(state) {
+    return infer(EXPERT_WEIGHTS, state, expertPhi);
+  }
+
+  return {
+    THETA_SCALE, OMEGA_SCALE, X_SCALE, V_SCALE, RULES, MIRROR, EXPERT_WEIGHTS,
+    clampForce, firing, dot, infer, expertForce,
+  };
+})();
+
+/**
+ * Fuzzy actor-critic: reinforcement learning on top of the fuzzy rule base. It starts
+ * knowing nothing (every rule force is 0 N) and only feels "it fell!". Mirrored rules share
+ * what they learn, so a lesson on one side also works on the other.
+ */
+class FuzzyActorCritic {
+  static GAMMA = 0.99;    // how far ahead it cares (about 2 s)
+  static LAMBDA = 0.9;    // eligibility traces: credit recent decisions
+  static ACTOR_RATE = 1.0;
+  static CRITIC_RATE = 0.5;
+  static SHAPING = 0.02;  // small penalty for leaning or leaving the center
+
+  constructor() {
+    const n = FuzzyRules.RULES;
+    this.w = new Float64Array(n);  // actor: force of each rule (N)
+    this.v = new Float64Array(n);  // critic: value of each rule
+    this.actorTrace = new Float64Array(n);
+    this.criticTrace = new Float64Array(n);
+    this.phi = new Float64Array(n);
+    this.previousPhi = new Float64Array(n);
+    this.hasPrevious = false;
+    this.previousMean = 0;
+    this.previousAction = 0;
+    this.recentDuration = 0;  // moving average of the attempt durations
+    this.rateScale = 1;       // shrinks after successes, so good habits are kept
+  }
+
+  static reward(state) {
+    const angle = state[0] / FuzzyRules.THETA_SCALE;
+    const position = state[2] / FuzzyRules.X_SCALE;
+    return -FuzzyActorCritic.SHAPING * (angle * angle + position * position);
+  }
+
+  /** Learns from the last decision, then chooses (and returns) the next force. */
+  act(state, reward, rateMultiplier, noise) {
+    FuzzyRules.firing(state, this.phi);
+    if (this.hasPrevious) {
+      const tdError = reward + FuzzyActorCritic.GAMMA * FuzzyRules.dot(this.v, this.phi)
+          - FuzzyRules.dot(this.v, this.previousPhi);
+      this.learn(tdError, rateMultiplier);
+    }
+    const mean = FuzzyRules.dot(this.w, this.phi);
+    const action = FuzzyRules.clampForce(mean + this.currentSigma(noise) * gaussian());
+    this.previousPhi.set(this.phi);
+    this.previousMean = mean;
+    this.previousAction = action;
+    this.hasPrevious = true;
+    return action;
+  }
+
+  /** Exploration noise (N): large while it keeps falling, small once it balances well. */
+  currentSigma(noise) {
+    return noise * Math.max(0.1, 1 - this.recentDuration / CartPoleModel.EPISODE_GOAL);
+  }
+
+  endEpisode(failed, duration, rateMultiplier) {
+    if (failed && this.hasPrevious) {
+      this.learn(-1 - FuzzyRules.dot(this.v, this.previousPhi), rateMultiplier); // the fall: reward -1
+    }
+    this.recentDuration = 0.8 * this.recentDuration + 0.2 * duration;
+    this.rateScale = failed ? Math.min(1, this.rateScale * 1.05) : Math.max(0.1, this.rateScale * 0.6);
+    this.startEpisode();
+  }
+
+  /** Without a goal, every goal-length stretch balanced counts as a success. */
+  checkpoint(duration) {
+    this.recentDuration = 0.8 * this.recentDuration + 0.2 * duration;
+    this.rateScale = Math.max(0.1, this.rateScale * 0.6);
+  }
+
+  startEpisode() {
+    this.actorTrace.fill(0);
+    this.criticTrace.fill(0);
+    this.hasPrevious = false;
+  }
+
+  learn(tdError, rateMultiplier) {
+    const exploration = this.previousAction - this.previousMean;
+    const actorRate = FuzzyActorCritic.ACTOR_RATE * this.rateScale * rateMultiplier;
+    const criticRate = FuzzyActorCritic.CRITIC_RATE * this.rateScale * rateMultiplier;
+    const decay = FuzzyActorCritic.GAMMA * FuzzyActorCritic.LAMBDA;
+    const { w, v, actorTrace, criticTrace, previousPhi } = this;
+    for (let i = 0; i < w.length; i++) {
+      criticTrace[i] = decay * criticTrace[i] + previousPhi[i];
+      actorTrace[i] = decay * actorTrace[i] + exploration * previousPhi[i];
+      v[i] += criticRate * tdError * criticTrace[i];
+      w[i] = FuzzyRules.clampForce(w[i] + actorRate * tdError * actorTrace[i]);
+    }
+    this.symmetrize();
+  }
+
+  /** The task is symmetric: mirrored rules get opposite forces and equal values. */
+  symmetrize() {
+    const { w, v } = this;
+    for (let i = 0; i < w.length; i++) {
+      const j = FuzzyRules.MIRROR[i];
+      if (j < i) continue;
+      const force = (w[i] - w[j]) / 2;
+      const value = (v[i] + v[j]) / 2;
+      w[i] = force;
+      w[j] = -force;
+      v[i] = value;
+      v[j] = value;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Physics model
+// ---------------------------------------------------------------------------
+
+/**
+ * Cart-pole model with a controller in the loop (Barto, Sutton & Anderson 1983 dynamics,
+ * with Florian 2007 corrections). theta = 0 means upright; positive theta leans right.
+ */
+class CartPoleModel {
+  static GRAVITY = 9.81;
+  static CART_FRICTION = 0.0005;
+  static POLE_FRICTION = 0.000002;
+  static CONTROL_PERIOD = 0.02;   // the controller decides 50 times per second
+  static FAIL_ANGLE = toRadians(12);
+  static EPISODE_GOAL = 120;      // s balanced = goal reached
+  static PUSH_DURATION = 0.2;     // s
+  static KEYBOARD_PUSH = 8;       // N
+  static TREMOR = 1.2;            // N, hand tremor of the clumsiest expert
+  static FALL_SHOW = 1.5;         // s the fall stays on screen before a new try
+  // Height of the pivot above the rail; the pole stops when the bob's surface touches the floor.
+  static PIVOT_HEIGHT = (WHEEL_R - 6 + CART_H + 16) / PIXELS_PER_METER;
+  static FLOOR_ANGLE = Math.acos(
+      -(CartPoleModel.PIVOT_HEIGHT - BOB_R / PIXELS_PER_METER) / (2 * HALF_POLE_LENGTH));
+  static TRAIL_CAPACITY = 90;
+  static SAMPLE_EVERY_STEPS = 2;  // 100 Hz with 5 ms steps
+  static LOG_CAPACITY = 400;
+
+  constructor() {
+    this.trail = [];
+    this.log = [];
+    this.learner = new FuzzyActorCritic();
+    this.x = 0;
+    this.xDot = 0;
+    this.theta = 0;
+    this.thetaDot = 0;
+    this.time = 0;
+    this.cartMass = 1.1;
+    this.poleMass = 0.1;
+    this.force = 0;
+    this.push = 0;
+    this.pushTimeLeft = 0;
+    this.controlClock = 0;
+    this.stepsSinceSample = 0;
+    this.dragging = false;
+    this.perceived = new Array(8);
+    this.perceivedIndex = 0;
+    this.perceivedCount = 0;
+    this.tremor = 0;
+    this.nextCheckpoint = 0;
+    this.fallLeft = 0;
+
+    this.episode = 1;
+    this.record = 0;
+    this.endCounter = 0;
+    this.lastEnd = null;
+    this.lastEndDuration = 0;
+    this.lastEndEpisode = 0;
+
+    this.mode = LEARN;
+    this.learningRate = 1;
+    this.exploration = 3;
+    this.initialAngle = toRadians(6);
+    this.pushStrength = 0;
+    this.goalEnabled = true;
+    this.pushChance = 0.3;
+    this.expertSkill = 0.4;
+    this.trackHalf = 2.0;
+    this.startEpisode();
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    this.learner.startEpisode(); // forget the last decision: another controller made it
+  }
+
+  setMasses(cartMass, poleMass) {
+    this.cartMass = cartMass;
+    this.poleMass = poleMass;
+  }
+
+  /** Starts a new attempt without counting the current one. */
+  restartEpisode() {
+    if (this.fallLeft > 0) this.episode++;
+    this.startEpisode();
+  }
+
+  /** Clears the learning chart (attempts and record) and starts a new attempt. */
+  restartAndClearChart() {
+    this.log = [];
+    this.record = 0;
+    this.episode = 1;
+    this.startEpisode();
+  }
+
+  /** Erases everything the learner knows and the attempt history. */
+  forget() {
+    this.learner = new FuzzyActorCritic();
+    this.restartAndClearChart();
+  }
+
+  /** A short push on the cart, like a bump on the arm (+1 = to the right). */
+  pushCart(direction) {
+    this.push = direction * CartPoleModel.KEYBOARD_PUSH;
+    this.pushTimeLeft = CartPoleModel.PUSH_DURATION;
+  }
+
+  setDragging(value) {
+    this.dragging = value;
+    if (value) this.trail = [];
+  }
+
+  moveCart(newX) {
+    this.x = Math.max(-this.trackHalf, Math.min(this.trackHalf, newX));
+    this.xDot = 0;
+  }
+
+  rotatePole(newTheta) {
+    this.theta = newTheta;
+    this.thetaDot = 0;
+  }
+
+  releaseCart(velocity) {
+    this.xDot = velocity;
+    this.dragging = false;
+  }
+
+  releasePole(angularVelocity) {
+    this.thetaDot = angularVelocity;
+    this.dragging = false;
+  }
+
+  /** Advances the simulation by one physics step (RK4); the controller acts every 20 ms. */
+  step(dt) {
+    if (this.dragging) return; // the user is holding the cart or the pole
+    if (this.fallLeft > 0) {
+      this.showFall(dt);
+      return;
+    }
+    this.controlClock -= dt;
+    if (this.controlClock <= 0) {
+      this.controlClock += CartPoleModel.CONTROL_PERIOD;
+      this.decide();
+    }
+    this.updatePush(dt);
+    this.integrate(this.force + this.push, dt);
+
+    this.time += dt;
+    if (++this.stepsSinceSample >= CartPoleModel.SAMPLE_EVERY_STEPS) {
+      this.stepsSinceSample = 0;
+      this.recordSample();
+    }
+
+    if (Math.abs(normalizeAngle(this.theta)) > CartPoleModel.FAIL_ANGLE) {
+      this.endEpisode(FELL);
+    } else if (Math.abs(this.x) > this.trackHalf) {
+      this.endEpisode(HIT_WALL);
+    } else if (this.goalEnabled && this.time >= CartPoleModel.EPISODE_GOAL) {
+      this.endEpisode(GOAL);
+    } else if (!this.goalEnabled && this.time >= this.nextCheckpoint) {
+      // No goal: the attempt goes on, but each goal-length stretch still consolidates learning.
+      if (this.mode === LEARN) this.learner.checkpoint(CartPoleModel.EPISODE_GOAL);
+      this.nextCheckpoint += CartPoleModel.EPISODE_GOAL;
+    }
+  }
+
+  /** The controller looks at the state and chooses the force for the next 20 ms. */
+  decide() {
+    const state = [normalizeAngle(this.theta), this.thetaDot, this.x, this.xDot];
+    if (this.mode === LEARN) {
+      this.force = this.learner.act(state, FuzzyActorCritic.reward(state), this.learningRate,
+          this.exploration);
+    } else {
+      this.force = this.humanExpertForce(state);
+    }
+  }
+
+  /**
+   * The expert rules applied by someone with human reflexes: they see the state a little
+   * late and not exactly, correct with a lighter hand and their hand trembles.
+   */
+  humanExpertForce(state) {
+    const clumsiness = 0.6 * (1 - this.expertSkill);
+    const seen = [
+      state[0] + gaussian() * clumsiness * toRadians(1.5),
+      state[1] + gaussian() * clumsiness * toRadians(12),
+      state[2] + gaussian() * clumsiness * 0.05,
+      state[3] + gaussian() * clumsiness * 0.1];
+    const size = this.perceived.length;
+    this.perceived[this.perceivedIndex] = seen;
+    this.perceivedIndex = (this.perceivedIndex + 1) % size;
+    this.perceivedCount = Math.min(this.perceivedCount + 1, size);
+
+    // Reaction time: up to 40 ms (2 decisions of 20 ms) for the clumsiest expert.
+    const delay = Math.min(Math.round(clumsiness * 3), this.perceivedCount - 1);
+    const used = this.perceived[(this.perceivedIndex - 1 - delay + size) % size];
+
+    const gain = 0.8 + 0.2 * this.expertSkill;
+    this.tremor = 0.85 * this.tremor + gaussian() * clumsiness * CartPoleModel.TREMOR;
+    return FuzzyRules.clampForce(gain * FuzzyRules.expertForce(used) + this.tremor);
+  }
+
+  updatePush(dt) {
+    if (this.pushTimeLeft > 0) {
+      this.pushTimeLeft -= dt;
+      if (this.pushTimeLeft <= 0) this.push = 0;
+      return;
+    }
+    if (this.pushStrength <= 0 || this.pushChance <= 0) return;
+    // Chance per step such that the chance within one second is pushChance.
+    const perStep = 1 - Math.pow(1 - Math.min(this.pushChance, 0.999999), dt);
+    if (Math.random() < perStep) {
+      const direction = randomBoolean() ? 1 : -1;
+      this.push = direction * this.pushStrength * (0.5 + 0.5 * Math.random());
+      this.pushTimeLeft = CartPoleModel.PUSH_DURATION;
+    }
+  }
+
+  endEpisode(reason) {
+    if (this.mode === LEARN) {
+      this.learner.endEpisode(reason !== GOAL, this.time, this.learningRate);
+    }
+    this.log.push({ duration: this.time, mode: this.mode, end: reason });
+    if (this.log.length > CartPoleModel.LOG_CAPACITY) this.log.shift();
+    this.record = Math.max(this.record, this.time);
+    this.lastEnd = reason;
+    this.lastEndDuration = this.time;
+    this.lastEndEpisode = this.episode;
+    this.endCounter++;
+    if (reason === GOAL) {
+      this.episode++;
+      this.startEpisode();
+    } else {
+      // Nobody controls the cart anymore: let the pole really fall so it can be seen.
+      this.fallLeft = CartPoleModel.FALL_SHOW;
+      this.force = 0;
+      this.push = 0;
+      this.pushTimeLeft = 0;
+    }
+  }
+
+  /** The pole falls freely until it lies on the floor; the cart stops at the rail ends. */
+  showFall(dt) {
+    this.integrate(0, dt);
+    if (Math.abs(this.x) > this.trackHalf) {
+      this.x = Math.sign(this.x) * this.trackHalf; // crashed into the end stop
+      this.xDot = 0;
+    }
+    const angle = normalizeAngle(this.theta);
+    if (Math.abs(angle) > CartPoleModel.FLOOR_ANGLE) {
+      this.theta = Math.sign(angle) * CartPoleModel.FLOOR_ANGLE; // lying on the floor
+      this.thetaDot = 0;
+      this.xDot *= 0.9; // dragging the pole slows the cart down
+    }
+    if (++this.stepsSinceSample >= CartPoleModel.SAMPLE_EVERY_STEPS) {
+      this.stepsSinceSample = 0;
+      this.recordSample();
+    }
+    this.fallLeft -= dt;
+    if (this.fallLeft <= 0) {
+      this.episode++;
+      this.startEpisode();
+    }
+  }
+
+  /** New attempt: the pole starts near the top, leaning a little to a random side. */
+  startEpisode() {
+    this.fallLeft = 0;
+    this.nextCheckpoint = CartPoleModel.EPISODE_GOAL;
+    const side = randomBoolean() ? 1 : -1;
+    this.theta = side * this.initialAngle * (0.5 + 0.5 * Math.random());
+    this.thetaDot = 0;
+    this.x = 0;
+    this.xDot = 0;
+    this.time = 0;
+    this.force = 0;
+    this.push = 0;
+    this.pushTimeLeft = 0;
+    this.controlClock = 0;
+    this.stepsSinceSample = 0;
+    this.trail = [];
+    this.learner.startEpisode();
+    this.perceivedCount = 0;
+    this.tremor = 0;
+  }
+
+  integrate(appliedForce, dt) {
+    const s = [this.x, this.xDot, this.theta, this.thetaDot];
+    const k1 = this.derivatives(s, appliedForce);
+    const k2 = this.derivatives(addScaled(s, k1, dt / 2), appliedForce);
+    const k3 = this.derivatives(addScaled(s, k2, dt / 2), appliedForce);
+    const k4 = this.derivatives(addScaled(s, k3, dt), appliedForce);
+    for (let i = 0; i < 4; i++) s[i] += dt / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+    [this.x, this.xDot, this.theta, this.thetaDot] = s;
+  }
+
+  /** Returns d/dt of [x, xDot, theta, thetaDot]. */
+  derivatives(s, appliedForce) {
+    const xDot = s[1];
+    const theta = s[2];
+    const thetaDot = s[3];
+    const cartMass = this.cartMass;
+    const poleMass = this.poleMass;
+    const totalMass = cartMass + poleMass;
+    const sin = Math.sin(theta);
+    const cos = Math.cos(theta);
+    const cartFrictionForce = CartPoleModel.CART_FRICTION * Math.sign(xDot);
+
+    const temp = (-appliedForce - poleMass * HALF_POLE_LENGTH * thetaDot * thetaDot * sin
+        + cartFrictionForce) / totalMass;
+    const thetaAcc = (CartPoleModel.GRAVITY * sin + cos * temp
+        - CartPoleModel.POLE_FRICTION * thetaDot / (poleMass * HALF_POLE_LENGTH))
+        / (HALF_POLE_LENGTH * (4 / 3 - poleMass * cos * cos / totalMass));
+    const xAcc = (appliedForce
+        + poleMass * HALF_POLE_LENGTH * (thetaDot * thetaDot * sin - thetaAcc * cos)
+        - cartFrictionForce) / totalMass;
+    return [xDot, xAcc, thetaDot, thetaAcc];
+  }
+
+  recordSample() {
+    const poleLength = 2 * HALF_POLE_LENGTH;
+    this.trail.push([this.x + poleLength * Math.sin(this.theta), poleLength * Math.cos(this.theta)]);
+    if (this.trail.length > CartPoleModel.TRAIL_CAPACITY) this.trail.shift();
+  }
+
+  /** "Falling" progress: 1 right after a fall, down to 0 when the next try starts. */
+  falling() {
+    return this.fallLeft > 0 ? this.fallLeft / CartPoleModel.FALL_SHOW : 0;
+  }
+
+  ruleForces() {
+    return this.mode === EXPERT ? FuzzyRules.EXPERT_WEIGHTS : this.learner.w;
+  }
+}
+
+function addScaled(a, b, factor) {
+  return [a[0] + factor * b[0], a[1] + factor * b[1], a[2] + factor * b[2], a[3] + factor * b[3]];
+}
+
+/** Half the rail length (m) that fits the scene, at most 2 m. */
+function trackHalfFor(sceneWidth) {
+  const halfWorld = sceneWidth / PIXELS_PER_METER / 2;
+  return Math.max(0.8, Math.min(2.0, halfWorld - CART_W / 2 / PIXELS_PER_METER - 0.2));
+}
+
+// ---------------------------------------------------------------------------
+// Application state and simulation loop
+// ---------------------------------------------------------------------------
+
+const model = new CartPoleModel();
+let running = false;
+let speed = 1;
+let stepCount = 0;
+let loopCount = 0;
+let simTimer = null;
+let lastTick = 0;
+let accumulator = 0;
+
+/**
+ * Fixed time step integration that follows the wall clock, multiplied by the chosen speed
+ * (at 20x, one real second simulates twenty). Runs on its own timer, apart from drawing.
+ */
+function simulationTick() {
+  if (!running) return;
+  const now = performance.now();
+  accumulator += Math.min((now - lastTick) / 1000, MAX_CATCH_UP) * speed;
+  lastTick = now;
+  while (accumulator >= TIME_STEP) {
+    model.step(TIME_STEP);
+    accumulator -= TIME_STEP;
+    stepCount++;
+  }
+  loopCount++;
+  simTimer = setTimeout(simulationTick, SIMULATION_TICK_MS);
+}
+
+function startSimulation() {
+  if (running) return;
+  running = true;
+  lastTick = performance.now();
+  accumulator = 0;
+  simTimer = setTimeout(simulationTick, SIMULATION_TICK_MS);
+  updateButtons();
+}
+
+function stopSimulation() {
+  running = false;
+  clearTimeout(simTimer);
+  simTimer = null;
+  updateButtons();
+}
+
+function toggleSimulation() {
+  if (running) stopSimulation(); else startSimulation();
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar components
+// ---------------------------------------------------------------------------
+
+/** Labeled slider showing its formatted value: the single input component of the sidebar. */
+class ValueSlider {
+  constructor(name, min, max, step, defaultValue, format, accent, dotEvery, majorEvery) {
+    this.step = step;
+    this.min = Math.round(min / step);
+    this.max = Math.round(max / step);
+    this.steps = Math.round(defaultValue / step);
+    this.defaultValue = defaultValue;
+    this.format = format;
+    this.accent = accent;
+    this.dotEvery = dotEvery;
+    this.majorEvery = majorEvery;
+    this.listeners = [];
+
+    this.element = document.createElement('div');
+    this.element.className = 'slider';
+    this.element.innerHTML = '<div class="top"><span class="name"></span><span class="value"></span></div><canvas></canvas>';
+    this.element.querySelector('.name').textContent = name;
+    this.valueLabel = this.element.querySelector('.value');
+    this.canvas = this.element.querySelector('canvas');
+    this.canvas.setAttribute('role', 'slider');
+    this.canvas.setAttribute('aria-label', name);
+
+    const fromPointer = e => {
+      const rect = this.canvas.getBoundingClientRect();
+      const { left, right } = this.trackBounds(rect.width);
+      const t = (e.clientX - rect.left - left) / Math.max(1, right - left);
+      this.setSteps(Math.round(this.min + t * (this.max - this.min)));
+    };
+    this.canvas.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      this.canvas.setPointerCapture(e.pointerId);
+      this.dragging = true;
+      fromPointer(e);
+      e.preventDefault();
+    });
+    this.canvas.addEventListener('pointermove', e => {
+      if (this.dragging) fromPointer(e);
+    });
+    const end = () => { this.dragging = false; };
+    this.canvas.addEventListener('pointerup', end);
+    this.canvas.addEventListener('pointercancel', end);
+    // The mouse wheel is left alone, so scrolling the page never changes a value.
+    // Double-click restores the default value.
+    this.canvas.addEventListener('dblclick', () => this.setValue(this.defaultValue));
+    this.update();
+  }
+
+  trackBounds(width) {
+    return { left: 11, right: width - 11 };
+  }
+
+  getValue() {
+    return this.steps * this.step;
+  }
+
+  setValue(value) {
+    this.setSteps(Math.round(value / this.step));
+  }
+
+  setSteps(steps) {
+    const clamped = Math.max(this.min, Math.min(this.max, steps));
+    if (clamped === this.steps) return;
+    this.steps = clamped;
+    this.update();
+    for (const listener of this.listeners) listener();
+  }
+
+  onChange(action) {
+    this.listeners.push(action);
+  }
+
+  update() {
+    this.valueLabel.textContent = this.format(this.getValue());
+    this.valueLabel.style.color = rgba(this.accent());
+    this.canvas.setAttribute('aria-valuetext', this.valueLabel.textContent);
+    this.paint();
+  }
+
+  paint() {
+    const width = this.canvas.clientWidth;
+    if (width <= 0) return;
+    const height = 23;
+    const g = hiDpi(this.canvas, width, height);
+    const accent = this.accent();
+    const cy = 11;
+    const { left, right } = this.trackBounds(width);
+    const xFor = v => left + (v - this.min) / Math.max(1, this.max - this.min) * (right - left);
+
+    roundRectPath(g, left, cy - 3, right - left, 6, 6);
+    g.fillStyle = rgba(T.FIELD);
+    g.fill();
+
+    // The fill starts at zero (or at the minimum), so signed values grow both ways.
+    const origin = Math.max(this.min, Math.min(this.max, 0));
+    const originX = xFor(origin);
+    const thumbX = xFor(this.steps);
+    if (Math.abs(thumbX - originX) > 1) {
+      roundRectPath(g, Math.min(originX, thumbX), cy - 3, Math.abs(thumbX - originX), 6, 6);
+      g.fillStyle = linear(g, originX, 0, rgba(accent, 80), thumbX, 0, rgba(accent));
+      g.fill();
+    }
+
+    const low = Math.min(origin, this.steps);
+    const high = Math.max(origin, this.steps);
+    for (let v = this.min; v <= this.max; v++) {
+      if (v % this.dotEvery !== 0) continue;
+      const filled = v >= low && v <= high;
+      fillCircle(g, xFor(v), cy + 9, v % this.majorEvery === 0 ? 1.8 : 1.0,
+          filled ? rgba(accent, 150) : rgba(T.MUTED, 90));
+    }
+
+    fillCircle(g, thumbX, cy, 10, rgba(accent, 50));
+    fillCircle(g, thumbX, cy, 7, '#F8FAFC');
+    setStroke(g, 2.5, false);
+    g.strokeStyle = rgba(accent);
+    circlePath(g, thumbX, cy, 7);
+    g.stroke();
+  }
+}
+
+/** Sidebar button with a glyph, colored like Pendulo4's ModernButton. */
+class ModernButton {
+  constructor(element, text, glyph, accent, primary) {
+    this.element = element;
+    this.glyph = glyph;
+    this.accent = accent;
+    this.primary = primary;
+    element.innerHTML = '<canvas aria-hidden="true"></canvas><span></span>';
+    element.querySelector('span').textContent = text;
+    this.icon = element.querySelector('canvas');
+    // Like the Java buttons, they never take the keyboard focus (Space stays a shortcut).
+    element.addEventListener('mousedown', e => e.preventDefault());
+  }
+
+  set enabled(value) {
+    this.element.disabled = !value;
+  }
+
+  paint() {
+    const accent = this.accent();
+    const s = this.element.style;
+    let foreground;
+    if (this.primary) {
+      s.setProperty('--top', rgba(accent));
+      s.setProperty('--top-hover', rgba(mix(accent, WHITE, 0.18)));
+      s.setProperty('--bottom', rgba(mix(accent, BLACK, 0.28)));
+      s.setProperty('--bottom-pressed', rgba(mix(accent, BLACK, 0.45)));
+      foreground = T.dark ? hex(0x041318) : WHITE;
+    } else {
+      s.setProperty('--bg', rgba(accent, 22));
+      s.setProperty('--bg-hover', rgba(accent, 45));
+      s.setProperty('--bg-pressed', rgba(accent, 70));
+      s.setProperty('--border', rgba(accent, 150));
+      s.setProperty('--border-hover', rgba(accent, 230));
+      foreground = T.dark ? mix(accent, WHITE, 0.3) : mix(accent, BLACK, 0.15);
+    }
+    s.setProperty('--fg', rgba(foreground));
+
+    const size = 15;
+    const g = hiDpi(this.icon, size, size);
+    const color = rgba(foreground);
+    g.fillStyle = color;
+    g.strokeStyle = color;
+    const cy = size / 2;
+    if (this.glyph === 'play') {
+      g.beginPath();
+      g.moveTo(1, cy - size / 2);
+      g.lineTo(size, cy);
+      g.lineTo(1, cy + size / 2);
+      g.closePath();
+      g.fill();
+    } else if (this.glyph === 'stop') {
+      roundRectPath(g, 0.5, 0.5, size - 1, size - 1, 3);
+      g.fill();
+    } else {
+      const r = size / 2 - 1;
+      const cx = size / 2;
+      setStroke(g, 2, true);
+      g.beginPath();
+      g.arc(cx, cy, r, toRadians(-60), toRadians(-350), true);
+      g.stroke();
+      const a = toRadians(350);
+      const ex = cx + r * Math.cos(a);
+      const ey = cy - r * Math.sin(a);
+      const dx = -Math.sin(a);
+      const dy = -Math.cos(a);
+      g.beginPath();
+      g.moveTo(ex + dx * 4, ey + dy * 4);
+      g.lineTo(ex - dy * 3.5, ey + dx * 3.5);
+      g.lineTo(ex + dy * 3.5, ey - dx * 3.5);
+      g.closePath();
+      g.fill();
+    }
+  }
+}
+
+// Every input of the sidebar is the same component: a labeled slider (no typing).
+const speedInput = new ValueSlider('Velocidad de la simulación', 1, 50, 1, 1,
+    v => num(v, 0) + '×', () => T.CYAN, 5, 25);
+const learningRateInput = new ValueSlider('Tasa de aprendizaje', 0.1, 3, 0.1, 1,
+    v => num(v, 1) + '×', () => T.VIOLET, 5, 10);
+const explorationInput = new ValueSlider('Exploración (ruido)', 0, 6, 0.5, 3,
+    v => num(v, 1) + ' N', () => T.VIOLET, 2, 4);
+const initialAngleInput = new ValueSlider('Inclinación inicial', 1, 15, 1, 6,
+    v => '±' + num(v, 0) + '°', () => T.TEAL, 1, 5);
+const pushInput = new ValueSlider('Fuerza del empujón', 0, 10, 0.5, 0,
+    v => num(v, 1) + ' N', () => T.AMBER, 2, 10);
+const pushChanceInput = new ValueSlider('Probabilidad de empujón', 0, 100, 5, 30,
+    v => num(v, 0) + '% por s', () => T.AMBER, 2, 10);
+const cartMassInput = new ValueSlider('Masa del carrito', 0.1, 20, 0.1, 1.1,
+    v => num(v, 1) + ' kg', () => T.AMBER, 10, 50);
+const poleMassInput = new ValueSlider('Masa de la varilla', 0.01, 5, 0.01, 0.1,
+    v => num(v, 2) + ' kg', () => T.AMBER, 25, 100);
+const expertSkillInput = new ValueSlider('Habilidad del experto', 0, 100, 5, 40,
+    v => num(v, 0) + '%', () => T.VIOLET, 2, 10);
+const learningInputs = [speedInput, learningRateInput, explorationInput];
+const environmentInputs = [initialAngleInput, pushInput, pushChanceInput, cartMassInput, poleMassInput];
+const allSliders = [expertSkillInput, ...learningInputs, ...environmentInputs];
+
+const btForget = new ModernButton(document.getElementById('btForget'),
+    'Olvidar lo aprendido', 'reset', () => T.ROSE, false);
+const btStart = new ModernButton(document.getElementById('btStart'), 'Iniciar', 'play', () => T.TEAL, true);
+const btStop = new ModernButton(document.getElementById('btStop'), 'Detener', 'stop', () => T.ROSE, false);
+const btReset = new ModernButton(document.getElementById('btReset'), 'Reiniciar', 'reset', () => T.CYAN, false);
+const allButtons = [btForget, btStart, btStop, btReset];
+
+const modeButtons = Array.from(document.querySelectorAll('#modeControl button'));
+const modeAccents = [() => T.CYAN, () => T.VIOLET];
+let selectedMode = 0;
+
+function buildSidebar() {
+  expertSkillInput.element.classList.add('first');
+  document.getElementById('skillSlot').appendChild(expertSkillInput.element);
+  for (const input of learningInputs) document.getElementById('learningSlot').appendChild(input.element);
+  for (const input of environmentInputs) document.getElementById('environmentSlot').appendChild(input.element);
+
+  // Every setting takes effect immediately, running or paused.
+  speedInput.onChange(() => { speed = speedInput.getValue(); });
+  learningRateInput.onChange(() => { model.learningRate = learningRateInput.getValue(); });
+  explorationInput.onChange(() => { model.exploration = explorationInput.getValue(); });
+  initialAngleInput.onChange(() => { model.initialAngle = toRadians(initialAngleInput.getValue()); });
+  pushInput.onChange(() => { model.pushStrength = pushInput.getValue(); });
+  pushChanceInput.onChange(() => { model.pushChance = pushChanceInput.getValue() / 100; });
+  expertSkillInput.onChange(() => { model.expertSkill = expertSkillInput.getValue() / 100; });
+  const applyMasses = () => model.setMasses(cartMassInput.getValue(), poleMassInput.getValue());
+  cartMassInput.onChange(applyMasses);
+  poleMassInput.onChange(applyMasses);
+
+  for (const button of modeButtons) {
+    button.addEventListener('mousedown', e => e.preventDefault());
+    button.addEventListener('click', () => selectMode(Number(button.dataset.index)));
+  }
+  btForget.element.addEventListener('click', () => model.forget());
+  btStart.element.addEventListener('click', startSimulation);
+  btStop.element.addEventListener('click', stopSimulation);
+  btReset.element.addEventListener('click', () => model.restartAndClearChart());
+
+  const themeButton = document.getElementById('themeToggle');
+  themeButton.addEventListener('mousedown', e => e.preventDefault());
+  themeButton.addEventListener('click', toggleTheme);
+  themeButton.addEventListener('mouseenter', () => { hoverThemeToggle = true; paintThemeToggle(); });
+  themeButton.addEventListener('mouseleave', () => { hoverThemeToggle = false; paintThemeToggle(); });
+}
+
+function selectMode(index) {
+  if (index < 0 || index >= MODES.length || index === selectedMode) return;
+  selectedMode = index;
+  model.setMode(MODES[index]);
+  updateModeControls();
+}
+
+function updateModeControls() {
+  modeButtons.forEach((button, i) => {
+    button.classList.toggle('selected', i === selectedMode);
+    button.style.setProperty('--seg-accent', rgba(modeAccents[i]()));
+    button.style.setProperty('--seg-hover', rgba(modeAccents[i](), 40));
+    button.style.setProperty('--seg-text', T.dark ? '#041318' : '#FFFFFF');
+  });
+  document.getElementById('modeDescription').textContent = model.mode === LEARN
+      ? 'Fuzzy + aprendizaje por refuerzo: empieza sin saber nada y aprende de cada caída.'
+      : 'Reglas fijas de la teoría de control, aplicadas con reflejos humanos.';
+  expertSkillInput.element.style.display = model.mode === EXPERT ? '' : 'none';
+  if (model.mode === EXPERT) expertSkillInput.paint();
+}
+
+function updateButtons() {
+  btStart.enabled = !running;
+  btStop.enabled = running;
+}
+
+let hoverThemeToggle = false;
+
+/** Shows the sun in the dark theme and the moon in the light theme (the theme it switches to). */
+function paintThemeToggle() {
+  const size = ui(24);
+  const g = hiDpi(document.getElementById('themeIcon'), size, size);
+  roundRectPath(g, 0.5, 0.5, size - 1, size - 1, 10);
+  g.fillStyle = hoverThemeToggle ? rgba(T.CYAN, 40) : rgba(T.FIELD);
+  g.fill();
+  setStroke(g, 1, false);
+  g.strokeStyle = hoverThemeToggle ? rgba(T.CYAN) : rgba(T.PANEL_BORDER);
+  g.stroke();
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size * 0.18;
+  if (T.dark) {
+    fillCircle(g, cx, cy, r, rgba(T.AMBER));
+    setStroke(g, 1.8, true);
+    g.strokeStyle = rgba(T.AMBER);
+    for (let k = 0; k < 8; k++) {
+      const a = k * Math.PI / 4;
+      strokeLine(g, cx + Math.cos(a) * r * 1.6, cy + Math.sin(a) * r * 1.6,
+          cx + Math.cos(a) * r * 2.3, cy + Math.sin(a) * r * 2.3);
+    }
+  } else {
+    g.save();
+    g.beginPath();
+    g.rect(0, 0, size, size);
+    g.arc(cx + r * 1.1, cy - r * 0.9, r * 1.7, 0, Math.PI * 2);
+    g.clip('evenodd');
+    fillCircle(g, cx, cy, r * 2, rgba(T.VIOLET));
+    g.restore();
+  }
+  document.getElementById('themeToggle').title =
+      T.dark ? 'Cambiar al tema claro (T)' : 'Cambiar al tema oscuro (T)';
+}
+
+function paintLogoCanvas() {
+  const g = hiDpi(document.getElementById('logo'), ui(44), ui(44));
+  paintLogo(g, 0, 0, ui(44));
+
+  const icon = document.createElement('canvas');
+  icon.width = 64;
+  icon.height = 64;
+  paintLogo(icon.getContext('2d'), 2, 2, 60);
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = icon.toDataURL('image/png');
+}
+
+/** Applies a theme to the whole page: canvas palette, CSS colors and sidebar widgets. */
+function applyTheme(dark) {
+  applyPalette(dark);
+  const root = document.documentElement;
+  root.dataset.theme = dark ? 'dark' : 'light';
+  root.style.setProperty('--bg-top', rgba(T.BG_TOP));
+  root.style.setProperty('--panel', rgba(T.PANEL));
+  root.style.setProperty('--panel-border', rgba(T.PANEL_BORDER));
+  root.style.setProperty('--field', rgba(T.FIELD));
+  root.style.setProperty('--text', rgba(T.TEXT));
+  root.style.setProperty('--muted', rgba(T.MUTED));
+  root.style.setProperty('--cyan', rgba(T.CYAN));
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.appendChild(meta);
+  }
+  meta.content = rgba(T.BG_TOP);
+  for (const slider of allSliders) slider.update();
+  for (const button of allButtons) button.paint();
+  updateModeControls();
+  paintThemeToggle();
+  paintLogoCanvas();
+}
+
+/** Switches between the dark and light themes and remembers the choice. */
+function toggleTheme() {
+  applyTheme(!T.dark);
+  saveTheme(T.dark);
+}
+
+/** Turns the goal on or off; without it an attempt only ends with a fall. */
+function toggleGoal() {
+  model.goalEnabled = !model.goalEnabled;
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts
+// ---------------------------------------------------------------------------
+
+window.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return; // leave system shortcuts alone
+  switch (e.code) {
+    case 'Space':
+      if (!e.repeat) toggleSimulation(); // ignore auto-repeat while the key is held
+      break;
+    case 'KeyR':
+      if (!e.repeat) model.restartAndClearChart();
+      break;
+    case 'KeyM':
+      selectMode((selectedMode + 1) % 2);
+      break;
+    case 'ArrowLeft':
+      model.pushCart(-1);
+      break;
+    case 'ArrowRight':
+      model.pushCart(+1);
+      break;
+    case 'KeyT':
+      toggleTheme();
+      break;
+    case 'KeyG':
+      toggleGoal();
+      break;
+    default:
+      return;
+  }
+  e.preventDefault();
+});
+
+// ---------------------------------------------------------------------------
+// Simulation canvas
+// ---------------------------------------------------------------------------
+
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const startMillis = performance.now();
+
+// Stars with a fixed seed, so the sky is always the same.
+const stars = (() => {
+  let seed = 7;
+  const random = () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const list = [];
+  for (let i = 0; i < STAR_COUNT; i++) {
+    list.push({
+      x: random(), y: Math.pow(random(), 1.3), size: 0.6 + random() * 1.8,
+      alpha: 60 + random() * 170, speed: 0.5 + random() * 2.5, phase: random() * Math.PI * 2,
+    });
+  }
+  return list;
+})();
+const heatmapPhi = new Float64Array(FuzzyRules.RULES);
+
+// Layout in logical pixels (the scene is drawn at 'scale' CSS pixels per logical pixel).
+const view = { W: 1000, H: 800, scale: 1, ratio: 1, narrow: false, cssW: 0, cssH: 0 };
+
+let backdrop = null;
+let backdropKey = '';
+
+const pointer = {
+  hoverCart: false, hoverBob: false, grabbingCart: false, grabbingPole: false,
+  grabOffsetPx: 0, lastDragValue: 0, flingVelocity: 0, lastDragMillis: 0, id: null,
+};
+
+let telemetryFade = 1;
+let learningFade = 1;
+let rateSampleMillis = performance.now();
+let rateSampleSteps = 0;
+let stepsPerSecond = 0;
+
+let goalToggleBounds = null;
+let startHintBounds = null;
+let hoverGoalToggle = false;
+let seenEndCounter = -1;
+let toastText = null;
+let toastColor = null;
+let toastStart = 0;
+
+/**
+ * Fits the scene to the window. Wide screens use the Java layout at 1:1; small screens draw
+ * the same scene scaled down, and phones stack the two cards on top of the scene.
+ */
+function layout() {
+  const stacked = window.matchMedia('(max-width: 999px)').matches;
+  const cssW = stage.clientWidth;
+  let scale;
+  let logicalH;
+  let narrow = false;
+  if (cssW < 600) {
+    narrow = true;
+    scale = Math.max(0.45, Math.min(1, cssW / 650));
+    // Both cards, the upright pole above the cart and the hanging pole below the rail.
+    const cards = HUD_MARGIN + ui(150) + 12 + cardHeight();
+    logicalH = cards + 12 + (POLE_PX + BOB_R + 92) + (POLE_PX + BOB_R - 92) + HUD_MARGIN + 6;
+  } else if (stacked) {
+    // Short screens (a phone lying down) keep a readable scale and let the page scroll.
+    const availH = Math.max(window.innerHeight * 0.92, 360);
+    scale = Math.max(Math.min(1, cssW / 900, availH / 700), Math.min(1, cssW / 900, 0.65));
+    logicalH = Math.max(700, Math.min(800, availH / scale));
+  } else {
+    scale = Math.min(1, cssW / 900, stage.clientHeight / 700);
+    logicalH = stage.clientHeight / scale;
+  }
+  if (stacked) {
+    stage.style.setProperty('--stage-height', Math.round(logicalH * scale) + 'px');
+  }
+  const cssH = stacked ? Math.round(logicalH * scale) : stage.clientHeight;
+  const ratio = window.devicePixelRatio || 1;
+  view.narrow = narrow;
+  view.scale = scale;
+  view.ratio = ratio;
+  view.cssW = cssW;
+  view.cssH = cssH;
+  view.W = cssW / scale;
+  view.H = cssH / scale;
+  const pixelW = Math.max(1, Math.round(cssW * ratio));
+  const pixelH = Math.max(1, Math.round(cssH * ratio));
+  if (canvas.width !== pixelW || canvas.height !== pixelH) {
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+  }
+}
+
+function cardHeight() {
+  return ui(214);
+}
+
+function telemetryRect() {
+  if (view.narrow) return { x: HUD_MARGIN, y: HUD_MARGIN, w: view.W - 2 * HUD_MARGIN, h: ui(150) };
+  return { x: HUD_MARGIN, y: HUD_MARGIN, w: ui(270), h: cardHeight() };
+}
+
+function learningRect() {
+  if (view.narrow) {
+    const telemetry = telemetryRect();
+    return { x: HUD_MARGIN, y: telemetry.y + telemetry.h + 12, w: view.W - 2 * HUD_MARGIN, h: cardHeight() };
+  }
+  const cardW = ui(270);
+  return { x: 2 * HUD_MARGIN + cardW, y: HUD_MARGIN, w: view.W - 3 * HUD_MARGIN - cardW, h: cardHeight() };
+}
+
+function cardsBottom() {
+  const learning = learningRect();
+  return learning.y + learning.h;
+}
+
+/**
+ * Ground level: about 79% of the height, low enough for the upright pole to stay below
+ * the cards and high enough for a hanging pole to stay above the bottom edge.
+ */
+function trackY() {
+  const pivotBelowTrack = pivotY(0); // negative: the pivot is above the rail
+  const highestBob = -pivotBelowTrack + POLE_PX + BOB_R;
+  const lowestBob = pivotBelowTrack + POLE_PX + BOB_R;
+  const minTrackY = cardsBottom() + 12 + highestBob;
+  const maxTrackY = view.H - HUD_MARGIN - lowestBob;
+  return Math.round(Math.min(Math.max(view.H * 0.79, minTrackY), maxTrackY));
+}
+
+function bodyTop(track) {
+  return track - WHEEL_R + 6 - CART_H;
+}
+
+/** The pole hangs from a bearing on top of a short pillar above the deck. */
+function pivotY(track) {
+  return bodyTop(track) - 16;
+}
+
+/** Screen x of a rail position (x = 0 is the middle of the scene). */
+function screenX(x) {
+  return view.W / 2 + x * PIXELS_PER_METER;
+}
+
+function render() {
+  layout();
+  const g = ctx;
+  const w = view.W;
+  const h = view.H;
+  g.setTransform(view.ratio * view.scale, 0, 0, view.ratio * view.scale, 0, 0);
+  g.textBaseline = 'alphabetic';
+
+  model.trackHalf = trackHalfFor(w);
+  const now = (performance.now() - startMillis) / 1000;
+  const track = trackY();
+  updateStepRate();
+  updateToast(now);
+
+  paintBackdrop(g, w, h, track);
+  paintStars(g, w, track, now);
+  paintRailEnds(g, track);
+  paintTrail(g, track);
+  paintRig(g, screenX(model.x), track, now);
+  paintStartHint(g, w, track, now);
+  paintToast(g, w, now);
+
+  // Cards become see-through while the pole passes behind them.
+  const telemetry = telemetryRect();
+  const learning = learningRect();
+  telemetryFade = fadeToward(telemetryFade, poleOverlaps(telemetry, track));
+  learningFade = fadeToward(learningFade, poleOverlaps(learning, track));
+  paintFaded(g, telemetryFade, () => paintTelemetry(g, telemetry, now));
+  paintFaded(g, learningFade, () => paintLearning(g, learning));
+  paintFooter(g, w, h);
+  requestAnimationFrame(render);
+}
+
+function poleOverlaps(card, track) {
+  const x0 = card.x - BOB_R;
+  const y0 = card.y - BOB_R;
+  const x1 = card.x + card.w + BOB_R;
+  const y1 = card.y + card.h + BOB_R;
+  const px = screenX(model.x);
+  const py = pivotY(track);
+  const tx = px + POLE_PX * Math.sin(model.theta);
+  const ty = py - POLE_PX * Math.cos(model.theta);
+  // Segment against rectangle: sample the pole densely (it is only 200 px long).
+  for (let i = 0; i <= 40; i++) {
+    const sx = px + (tx - px) * i / 40;
+    const sy = py + (ty - py) * i / 40;
+    if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) return true;
+  }
+  return false;
+}
+
+/** Smoothly moves a card's opacity toward see-through (overlapped) or solid. */
+function fadeToward(current, overlapped) {
+  const target = overlapped ? 0.25 : 1;
+  return current + (target - current) * 0.2;
+}
+
+function paintFaded(g, alpha, painter) {
+  g.save();
+  if (alpha < 0.995) g.globalAlpha = alpha;
+  painter();
+  g.restore();
+}
+
+function updateStepRate() {
+  const now = performance.now();
+  const elapsed = (now - rateSampleMillis) / 1000;
+  if (elapsed >= 0.5) {
+    stepsPerSecond = (stepCount - rateSampleSteps) / elapsed;
+    rateSampleSteps = stepCount;
+    rateSampleMillis = now;
+  }
+}
+
+// ----- static scenery (cached) -----
+
+function paintBackdrop(g, w, h, track) {
+  const key = [canvas.width, canvas.height, view.scale, view.ratio, T.version, track].join('|');
+  if (!backdrop || backdropKey !== key) {
+    backdrop = buildBackdrop(w, h, track);
+    backdropKey = key;
+  }
+  g.drawImage(backdrop, 0, 0, w, h);
+}
+
+function buildBackdrop(w, h, track) {
+  const image = document.createElement('canvas');
+  image.width = canvas.width;
+  image.height = canvas.height;
+  const g = image.getContext('2d');
+  const k = view.ratio * view.scale;
+  g.setTransform(k, 0, 0, k, 0, 0);
+
+  // Sky
+  g.fillStyle = linear(g, 0, 0, rgba(T.BG_TOP), 0, track, rgba(T.BG_MID));
+  g.fillRect(0, 0, w, track + 1);
+  paintNebula(g, w * 0.22, h * 0.16, w * 0.38, T.VIOLET, 46);
+  paintNebula(g, w * 0.82, h * 0.30, w * 0.30, T.PINK, 26);
+  paintNebula(g, w * 0.55, track, w * 0.45, T.CYAN, 30);
+
+  // Floor with perspective grid
+  g.fillStyle = linear(g, 0, track, rgba(T.FLOOR_TOP), 0, h, rgba(T.FLOOR_BOTTOM));
+  g.fillRect(0, track, w, h - track);
+
+  g.save();
+  g.beginPath();
+  g.rect(0, track, w, h - track);
+  g.clip();
+  setStroke(g, 1, false);
+  const vanishingX = w / 2;
+  g.strokeStyle = rgba(T.GRID, 22);
+  for (let i = -40; i <= 40; i++) {
+    strokeLine(g, vanishingX + i * 46, track, vanishingX + i * 46 * 4.5, h);
+  }
+  const rows = 12;
+  for (let row = 1; row <= rows; row++) {
+    const t = row / rows;
+    const y = track + (h - track) * t * t;
+    g.strokeStyle = rgba(T.GRID, Math.trunc(8 + 36 * t));
+    strokeLine(g, 0, y, w, y);
+  }
+  g.restore();
+
+  // Horizon glow
+  g.fillStyle = linear(g, 0, track - 110, rgba(T.CYAN, 0), 0, track, rgba(T.CYAN, 38));
+  g.fillRect(0, track - 110, w, 110);
+
+  // Rail
+  setStroke(g, 9, true);
+  g.strokeStyle = rgba(T.CYAN, 36);
+  strokeLine(g, 0, track, w, track);
+  setStroke(g, 2, false);
+  g.strokeStyle = rgba(T.RAIL);
+  strokeLine(g, 0, track, w, track);
+
+  // Ruler centered on the middle of the rail (every 25 cm, labels every meter)
+  setFont(g, MONO, false, 10);
+  const center = w / 2;
+  const quarterPx = 0.25 * PIXELS_PER_METER;
+  const maxQuarter = Math.ceil(center / quarterPx);
+  for (let quarter = -maxQuarter; quarter <= maxQuarter; quarter++) {
+    const px = center + quarter * quarterPx;
+    if (px < 0 || px > w) continue;
+    const meter = quarter % 4 === 0;
+    const half = quarter % 2 === 0;
+    const length = meter ? 10 : half ? 6 : 3;
+    setStroke(g, 1, false);
+    g.strokeStyle = rgba(T.TEXT, meter ? 130 : 60);
+    strokeLine(g, px, track + 5, px, track + 5 + length);
+    if (meter) {
+      const label = quarter === 0 ? '0' : (quarter / 4) + ' m';
+      const labelW = textWidth(g, label);
+      const labelX = px - labelW / 2;
+      if (labelX >= 0 && labelX + labelW <= w) {
+        g.fillStyle = rgba(T.MUTED);
+        g.fillText(label.replace('-', '−'), labelX, track + ui(22));
+      }
+    }
+  }
+
+  // Vignette
+  const radius = Math.max(w, h) * 0.78;
+  g.fillStyle = radial(g, w / 2, h / 2, radius,
+      [[0.55, 'rgba(0,0,0,0)'], [1, `rgba(0,0,0,${(T.dark ? 150 : 40) / 255})`]]);
+  g.fillRect(0, 0, w, h);
+  return image;
+}
+
+function paintNebula(g, cx, cy, radius, color, alpha) {
+  g.fillStyle = radial(g, cx, cy, radius, [[0, rgba(color, alpha)], [1, rgba(color, 0)]]);
+  circlePath(g, cx, cy, radius);
+  g.fill();
+}
+
+function paintStars(g, w, track, now) {
+  if (!T.dark) return; // no stars in daylight
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const star = stars[i];
+    const y = star.y * (track - 30);
+    const x = star.x * w;
+    const twinkle = 0.55 + 0.45 * Math.sin(now * star.speed + star.phase);
+    const alpha = Math.trunc(star.alpha * twinkle * (1 - y / track * 0.6));
+    fillCircle(g, x, y, star.size / 2, i % 5 === 0 ? rgba([170, 210, 255], alpha) : rgba(WHITE, alpha));
+  }
+}
+
+// ----- cart, pole and effects -----
+
+function paintTrail(g, track) {
+  const trail = model.trail;
+  const n = trail.length;
+  if (n < 2) return;
+  const py = pivotY(track);
+  const poleLength = 2 * HALF_POLE_LENGTH;
+  setStroke(g, 1, true);
+  for (let i = 1; i < n; i++) {
+    const x0 = screenX(trail[i - 1][0]);
+    const y0 = py - trail[i - 1][1] * PIXELS_PER_METER;
+    const x1 = screenX(trail[i][0]);
+    const y1 = py - trail[i][1] * PIXELS_PER_METER;
+    const f = i / (n - 1);
+    const upright = (1 + trail[i][1] / poleLength) / 2;
+    g.strokeStyle = rgba(mix(T.PINK, T.TEAL, upright), Math.trunc(190 * f * f));
+    g.lineWidth = 1 + 5 * f;
+    strokeLine(g, x0, y0, x1, y1);
+  }
+}
+
+/** End stops of the rail: the cart may not go past them. */
+function paintRailEnds(g, track) {
+  const postH = CART_H + 10;
+  for (let side = -1; side <= 1; side += 2) {
+    const edge = screenX(side * model.trackHalf) + side * (CART_W / 2 + 4);
+    const left = side < 0 ? edge - 12 : edge;
+    roundRectPath(g, left, track - postH, 12, postH + 4, 6);
+    g.fillStyle = '#1A1F2B';
+    g.fill();
+    g.save();
+    g.clip();
+    setStroke(g, 5, false);
+    g.strokeStyle = rgba(T.AMBER);
+    for (let y = track - postH - 12; y < track + 12; y += 14) {
+      strokeLine(g, left - 4, y + 12, left + 16, y);
+    }
+    g.restore();
+    roundRectPath(g, left, track - postH, 12, postH + 4, 6);
+    setStroke(g, 1, false);
+    g.strokeStyle = 'rgba(0,0,0,0.55)';
+    g.stroke();
+  }
+}
+
+function paintRig(g, cx, track, now) {
+  const top = bodyTop(track);
+  const bodyLeft = cx - CART_W / 2;
+  const pivotX = cx;
+  const py = pivotY(track);
+  const tipX = pivotX + POLE_PX * Math.sin(model.theta);
+  const tipY = py - POLE_PX * Math.cos(model.theta);
+  const falling = model.falling() > 0;
+  const fallColor = model.lastEnd === HIT_WALL ? T.AMBER : T.ROSE;
+  const bob = falling ? fallColor : bobColor(model.theta);
+
+  paintCartShadow(g, cx, track);
+  if (!falling) {
+    paintForceArrows(g, bodyLeft, top + CART_H / 2);
+    paintAngleGauge(g, model.theta, pivotX, py, bob);
+  }
+
+  setStroke(g, 16, true);
+  g.strokeStyle = rgba(bob, 26);
+  strokeLine(g, pivotX, py, tipX, tipY);
+  setStroke(g, 6, true);
+  g.strokeStyle = linear(g, pivotX, py, T.dark ? '#D5DCEB' : '#64748B', tipX, tipY, rgba(bob));
+  strokeLine(g, pivotX, py, tipX, tipY);
+
+  paintCartBody(g, bodyLeft, top, now);
+  const wheelAngle = model.x / (WHEEL_R / PIXELS_PER_METER); // rolling without slipping
+  paintWheel(g, bodyLeft + WHEEL_R + 10, track - WHEEL_R, wheelAngle);
+  paintWheel(g, bodyLeft + CART_W - WHEEL_R - 10, track - WHEEL_R, wheelAngle);
+  paintPivot(g, pivotX, py, top);
+  paintBob(g, tipX, tipY, bob, now);
+  if (falling) paintFallMark(g, tipX, tipY, track, fallColor);
+}
+
+/** A flash where the pole hits the floor. */
+function paintFallMark(g, tipX, tipY, track, color) {
+  if (tipY < track - BOB_R - 2) return; // the bob has not reached the floor yet
+  const fade = Math.min(1, model.falling() * 3); // fades out at the very end
+  g.fillStyle = radial(g, tipX, track, 60, [[0, rgba(color, Math.trunc(150 * fade))], [1, rgba(color, 0)]]);
+  circlePath(g, tipX, track, 60);
+  g.fill();
+}
+
+function paintCartShadow(g, cx, track) {
+  const rx = CART_W * 0.75;
+  const ry = 9;
+  g.save();
+  g.translate(cx, track + 2);
+  g.scale(1, ry / rx);
+  g.fillStyle = radial(g, 0, 0, rx, [[0, 'rgba(0,0,0,0.59)'], [1, 'rgba(0,0,0,0)']]);
+  circlePath(g, 0, 0, rx);
+  g.fill();
+  g.restore();
+}
+
+/** Force chosen by the controller (cyan = to the right, pink = to the left) and pushes. */
+function paintForceArrows(g, bodyLeft, y) {
+  const force = model.force;
+  if (force > 0.05) {
+    const end = bodyLeft - 10;
+    paintArrow(g, end - 20 - force * 7, end, y, T.CYAN, 'F ' + num(force, 1) + ' N');
+  } else if (force < -0.05) {
+    const end = bodyLeft + CART_W + 10;
+    paintArrow(g, end + 20 - force * 7, end, y, T.PINK, 'F ' + num(-force, 1) + ' N');
+  }
+  const push = model.push;
+  if (Math.abs(push) > 0.05) {
+    const pushY = y - CART_H * 0.62;
+    if (push > 0) {
+      const end = bodyLeft - 6;
+      paintArrow(g, end - 20 - push * 6, end, pushY, T.AMBER, 'empujón');
+    } else {
+      const end = bodyLeft + CART_W + 6;
+      paintArrow(g, end + 20 - push * 6, end, pushY, T.AMBER, 'empujón');
+    }
+  }
+}
+
+function paintArrow(g, fromX, toX, y, color, label) {
+  const direction = Math.sign(toX - fromX);
+  const shaftEnd = toX - direction * 12;
+
+  setStroke(g, 10, true);
+  g.strokeStyle = rgba(color, 30);
+  strokeLine(g, fromX, y, toX, y);
+
+  setStroke(g, 4, true);
+  g.strokeStyle = linear(g, fromX, 0, rgba(color, 40), shaftEnd, 0, rgba(color));
+  strokeLine(g, fromX, y, shaftEnd, y);
+
+  g.beginPath();
+  g.moveTo(toX, y);
+  g.lineTo(shaftEnd, y - 8);
+  g.lineTo(shaftEnd, y + 8);
+  g.closePath();
+  g.fillStyle = rgba(color);
+  g.fill();
+
+  setFont(g, MONO, true, 11);
+  const middle = (fromX + toX) / 2;
+  g.fillText(label, middle - textWidth(g, label) / 2, y - 12);
+}
+
+function paintAngleGauge(g, theta, px, py, color) {
+  const deg = toDegrees(normalizeAngle(theta));
+
+  setStroke(g, 1.2, false, [4, 4]);
+  g.strokeStyle = rgba(T.INK, 60);
+  strokeLine(g, px, py, px, py - 80);
+
+  // Limits: past them the attempt counts as a fall
+  setStroke(g, 2, true);
+  g.strokeStyle = rgba(T.ROSE, 170);
+  for (let side = -1; side <= 1; side += 2) {
+    const a = side * CartPoleModel.FAIL_ANGLE;
+    strokeLine(g, px + 40 * Math.sin(a), py - 40 * Math.cos(a), px + 54 * Math.sin(a), py - 54 * Math.cos(a));
+  }
+
+  setStroke(g, 2.2, true);
+  g.strokeStyle = rgba(color, 190);
+  g.beginPath();
+  g.arc(px, py, 44, -Math.PI / 2, -Math.PI / 2 + toRadians(deg), deg < 0);
+  g.stroke();
+
+  const label = signed(deg, 1) + '°';
+  setFont(g, MONO, true, 11);
+  const labelW = textWidth(g, label);
+  const lx = deg >= 0 ? px - 12 - labelW : px + 12; // opposite side of the pole
+  const ly = py - 68;
+  const m = g.measureText('Hg');
+  const ascent = m.fontBoundingBoxAscent || 12;
+  const descent = m.fontBoundingBoxDescent || 4;
+  roundRectPath(g, lx - 6, ly - ascent - 3, labelW + 12, ascent + descent + 4, 10);
+  g.fillStyle = rgba(T.BG_TOP, 180);
+  g.fill();
+  g.fillStyle = rgba(color);
+  g.fillText(label, lx, ly);
+}
+
+/** Lab cart: anodized side panel, aluminium deck, chassis rail, wheel wells, bumpers. */
+function paintCartBody(g, left, top, now) {
+  const right = left + CART_W;
+  const bottom = top + CART_H;
+  const wheelY = bottom - 6;
+  const wheelXs = [left + WHEEL_R + 10, right - WHEEL_R - 10];
+
+  // Rubber bumpers at both ends
+  const bumperY = top + CART_H * 0.3;
+  const bumperH = CART_H * 0.36;
+  const bumper = linear(g, 0, bumperY, '#2A2F3A', 0, bumperY + bumperH, '#0B0D12');
+  roundRectPath(g, left - 6, bumperY, 10, bumperH, 5);
+  g.fillStyle = bumper;
+  g.fill();
+  roundRectPath(g, right - 4, bumperY, 10, bumperH, 5);
+  g.fill();
+
+  // Anodized side panel
+  roundRectPath(g, left, top, CART_W, CART_H, 8);
+  g.fillStyle = linear(g, 0, top, rgba(T.CART_TOP), 0, bottom, rgba(T.CART_BOTTOM));
+  g.fill();
+
+  g.save();
+  g.clip();
+
+  // Panel seams (dark groove with a light bevel)
+  setStroke(g, 1, false);
+  for (const seamX of [left + CART_W / 3, left + 2 * CART_W / 3]) {
+    g.strokeStyle = 'rgba(0,0,0,0.31)';
+    strokeLine(g, seamX, top + 6, seamX, bottom);
+    g.strokeStyle = 'rgba(255,255,255,0.12)';
+    strokeLine(g, seamX + 1, top + 6, seamX + 1, bottom);
+  }
+
+  // Graphite chassis rail along the bottom
+  g.fillStyle = linear(g, 0, bottom - 16, '#2C3446', 0, bottom, '#10141E');
+  g.fillRect(left, bottom - 16, CART_W, 16);
+  g.strokeStyle = 'rgba(255,255,255,0.14)';
+  strokeLine(g, left, bottom - 16, right, bottom - 16);
+
+  // Wheel wells
+  for (const wheelX of wheelXs) {
+    fillCircle(g, wheelX, wheelY, WHEEL_R + 5, '#070A12');
+    setStroke(g, 1.2, false);
+    g.strokeStyle = 'rgba(255,255,255,0.16)';
+    g.stroke();
+  }
+
+  // Soft light from above
+  g.fillStyle = linear(g, 0, top, 'rgba(255,255,255,0.27)', 0, top + CART_H * 0.45, 'rgba(255,255,255,0)');
+  g.fillRect(left, top, CART_W, CART_H * 0.45);
+  g.restore();
+
+  // Brushed aluminium deck plate
+  roundRectPath(g, left + 4, top - 5, CART_W - 8, 9, 4);
+  g.fillStyle = linear(g, 0, top - 5, '#E6EAF2', 0, top + 4, '#7B8599');
+  g.fill();
+  setStroke(g, 0.6, false);
+  g.strokeStyle = 'rgba(255,255,255,0.24)';
+  for (let i = 0; i < 3; i++) {
+    const y = top - 3 + i * 2.4;
+    strokeLine(g, left + 10, y, right - 10, y);
+  }
+  roundRectPath(g, left + 4, top - 5, CART_W - 8, 9, 4);
+  setStroke(g, 0.9, false);
+  g.strokeStyle = 'rgba(0,0,0,0.43)';
+  g.stroke();
+
+  // Screws in the panel corners
+  for (const screwX of [left + 8, right - 8]) {
+    paintScrew(g, screwX, top + 10);
+    paintScrew(g, screwX, bottom - 23);
+  }
+
+  // Status lights in a recessed panel
+  const ledX = left + 26;
+  const ledY = top + 13;
+  roundRectPath(g, ledX - 8, ledY - 6.5, 40, 13, 7);
+  g.fillStyle = '#0B1022';
+  g.fill();
+  setStroke(g, 1, false);
+  g.strokeStyle = 'rgba(255,255,255,0.12)';
+  g.stroke();
+  const led = running ? T.GREEN : T.AMBER;
+  for (let i = 0; i < 3; i++) {
+    const intensity = running ? 0.5 + 0.5 * Math.sin(now * 6 - i * 0.9) : 1;
+    const lx = ledX + i * 12;
+    fillCircle(g, lx, ledY, 6, rgba(led, Math.trunc(45 * intensity)));
+    fillCircle(g, lx, ledY, 2.6, rgba(led, Math.trunc(110 + 145 * intensity)));
+  }
+
+  // Engraved name plate
+  const name = 'RK4';
+  setFont(g, MONO, true, 9);
+  const plateW = textWidth(g, name) + 14;
+  const plateH = 9 * FONT_SCALE * 1.3 + 2;
+  const plateX = right - 22 - plateW;
+  const plateY = top + 13 - plateH / 2;
+  roundRectPath(g, plateX, plateY, plateW, plateH, 4);
+  g.fillStyle = linear(g, 0, plateY, '#C9D0DD', 0, plateY + plateH, '#8790A4');
+  g.fill();
+  g.fillStyle = '#2A3142';
+  g.fillText(name, plateX + 7, baselineIn(g, plateY, plateH));
+
+  const highlighted = pointer.hoverCart || pointer.grabbingCart;
+  roundRectPath(g, left, top, CART_W, CART_H, 8);
+  setStroke(g, highlighted ? 2 : 1, false);
+  g.strokeStyle = highlighted ? rgba(T.CYAN) : 'rgba(0,0,0,0.47)';
+  g.stroke();
+}
+
+function paintScrew(g, x, y) {
+  g.fillStyle = radial(g, x - 0.8, y - 0.8, 3.2, [[0, '#F2F5FA'], [1, '#5C6580']]);
+  circlePath(g, x, y, 2.5);
+  g.fill();
+  setStroke(g, 0.9, false);
+  g.strokeStyle = '#262C3B';
+  strokeLine(g, x - 1.5, y + 1.5, x + 1.5, y - 1.5);
+}
+
+/** Rubber tire with rotating tread, metal rim with spoke cut-outs and an axle nut. */
+function paintWheel(g, cx, cy, angle) {
+  const r = WHEEL_R;
+  g.fillStyle = radial(g, cx, cy, r, [[0.6, '#2A2F3B'], [0.9, '#161A23'], [1, '#06080C']]);
+  circlePath(g, cx, cy, r);
+  g.fill();
+
+  setStroke(g, 2, false);
+  g.strokeStyle = '#030406';
+  for (let k = 0; k < 18; k++) {
+    const a = angle + k * 2 * Math.PI / 18;
+    strokeLine(g, cx + Math.cos(a) * (r - 3.5), cy + Math.sin(a) * (r - 3.5),
+        cx + Math.cos(a) * (r - 0.3), cy + Math.sin(a) * (r - 0.3));
+  }
+  setStroke(g, 1.4, true);
+  g.strokeStyle = 'rgba(255,255,255,0.18)';
+  g.beginPath();
+  g.arc(cx, cy, r - 2, toRadians(-100), toRadians(-170), true);
+  g.stroke();
+
+  const rim = r - 7;
+  g.fillStyle = radial(g, cx - rim * 0.3, cy - rim * 0.3, rim * 1.5, [[0, '#E8ECF4'], [1, '#66708A']]);
+  circlePath(g, cx, cy, rim);
+  g.fill();
+  setStroke(g, 1.2, false);
+  g.strokeStyle = '#343C50';
+  g.stroke();
+
+  setStroke(g, 2.6, true);
+  g.strokeStyle = '#2A3042';
+  for (let k = 0; k < 5; k++) {
+    const a = angle + k * 2 * Math.PI / 5;
+    strokeLine(g, cx + Math.cos(a) * 5, cy + Math.sin(a) * 5,
+        cx + Math.cos(a) * (rim - 2.5), cy + Math.sin(a) * (rim - 2.5));
+  }
+
+  g.fillStyle = radial(g, cx - 1.2, cy - 1.2, 5, [[0, '#FFFFFF'], [1, '#7A849C']]);
+  circlePath(g, cx, cy, 4.2);
+  g.fill();
+  fillCircle(g, cx, cy, 1.6, '#1E2433');
+}
+
+/** Aluminium pillar on the deck with the pole bearing on top. */
+function paintPivot(g, x, y, top) {
+  const baseY = top - 4;
+  g.beginPath();
+  g.moveTo(x - 18, baseY);
+  g.lineTo(x - 8, y);
+  g.lineTo(x + 8, y);
+  g.lineTo(x + 18, baseY);
+  g.closePath();
+  g.fillStyle = linear(g, x - 18, 0, '#DDE2EB', x + 18, 0, '#7A8498');
+  g.fill();
+  setStroke(g, 0.9, false);
+  g.strokeStyle = 'rgba(0,0,0,0.43)';
+  g.stroke();
+
+  g.fillStyle = radial(g, x - 3, y - 3, 13, [[0, '#8F99AE'], [1, '#262C3B']]);
+  circlePath(g, x, y, 10);
+  g.fill();
+  g.fillStyle = radial(g, x - 2, y - 2, 8, [[0, '#FFFFFF'], [1, '#6E7891']]);
+  circlePath(g, x, y, 6.5);
+  g.fill();
+  setStroke(g, 1, false);
+  g.strokeStyle = '#1B2130';
+  circlePath(g, x, y, 10);
+  g.stroke();
+  fillCircle(g, x, y, 2, '#1B2130');
+}
+
+function paintBob(g, x, y, color, now) {
+  const halo = BOB_R * 3.6;
+  g.fillStyle = radial(g, x, y, halo, [[0, rgba(color, 120)], [1, rgba(color, 0)]]);
+  circlePath(g, x, y, halo);
+  g.fill();
+
+  g.fillStyle = radial(g, x - BOB_R * 0.35, y - BOB_R * 0.4, BOB_R * 1.4,
+      [[0, '#FFFFFF'], [0.45, rgba(color)], [1, rgba(mix(color, BLACK, 0.55))]]);
+  circlePath(g, x, y, BOB_R);
+  g.fill();
+
+  if (pointer.hoverBob || pointer.grabbingPole) {
+    setStroke(g, 1.6, true, [4, 5], -now * 18);
+    g.strokeStyle = rgba(T.INK, 200);
+    circlePath(g, x, y, BOB_R + 7);
+    g.stroke();
+    g.setLineDash([]);
+  }
+}
+
+// ----- HUD -----
+
+function paintCard(g, x, y, w, h, title) {
+  roundRectPath(g, x, y, w, h, 18);
+  g.fillStyle = rgba(T.CARD);
+  g.fill();
+  g.fillStyle = linear(g, 0, y, 'rgba(255,255,255,0.07)', 0, y + 48, 'rgba(255,255,255,0)');
+  g.fill();
+  setStroke(g, 1, false);
+  g.strokeStyle = rgba(T.INK, 26);
+  g.stroke();
+
+  setFont(g, SANS, true, 10.5, 0.14);
+  g.fillStyle = rgba(T.MUTED);
+  g.fillText(title, x + 18, y + ui(25));
+  setFont(g, SANS, false, 10);
+}
+
+function paintTelemetry(g, card, now) {
+  const { x, y, w, h } = card;
+  paintCard(g, x, y, w, h, 'TELEMETRÍA');
+
+  let status;
+  let color;
+  if (model.dragging) {
+    status = 'SUJETANDO';
+    color = T.AMBER;
+  } else if (running) {
+    status = 'EN MARCHA';
+    color = T.GREEN;
+  } else {
+    status = 'EN PAUSA';
+    color = T.MUTED;
+  }
+  setFont(g, SANS, true, 10, 0.1);
+  const pillW = textWidth(g, status) + ui(30);
+  const pillH = ui(20);
+  const pillX = x + w - 14 - pillW;
+  const pillY = y + ui(10);
+  roundRectPath(g, pillX, pillY, pillW, pillH, pillH);
+  g.fillStyle = rgba(color, 34);
+  g.fill();
+  const pulse = running && !model.dragging ? 0.5 + 0.5 * Math.sin(now * 5) : 1;
+  fillCircle(g, pillX + ui(11), pillY + pillH / 2, ui(3.5), rgba(color, Math.trunc(90 + 165 * pulse)));
+  g.fillStyle = rgba(color);
+  g.fillText(status, pillX + ui(20), baselineIn(g, pillY, pillH));
+
+  const deg = toDegrees(normalizeAngle(model.theta));
+  const narrow = view.narrow;
+  const rows = [
+    ['θ', narrow ? 'ángulo' : 'ángulo', signed(deg, 1) + '°'],
+    ['ω', narrow ? 'vel. angular' : 'velocidad angular', signed(toDegrees(model.thetaDot), 1) + '°/s'],
+    ['x', narrow ? 'posición' : 'posición en el riel', signed(model.x, 2) + ' m'],
+    ['v', narrow ? 'velocidad' : 'velocidad del carrito', signed(model.xDot, 2) + ' m/s'],
+    ['F', narrow ? 'fuerza' : 'fuerza inferida', signed(model.force, 1) + ' N'],
+    ['t', narrow ? 'tiempo' : 'tiempo en equilibrio', num(model.time, 1) + ' s'],
+  ];
+
+  // Narrow screens: two columns of three rows, so the card stays short.
+  const columns = narrow ? 2 : 1;
+  const perColumn = rows.length / columns;
+  const columnW = (w - 36 - (columns - 1) * 24) / columns;
+  rows.forEach((row, i) => {
+    const column = Math.floor(i / perColumn);
+    const left = x + 18 + column * (columnW + 24);
+    const rowY = y + ui(58) + (i % perColumn) * ui(22);
+    setFont(g, MONO, true, 13);
+    g.fillStyle = rgba(T.CYAN);
+    g.fillText(row[0], left, rowY);
+    setFont(g, SANS, false, 12);
+    g.fillStyle = rgba(T.MUTED);
+    g.fillText(row[1], left + ui(22), rowY);
+    setFont(g, MONO, false, 13);
+    g.fillStyle = rgba(T.TEXT);
+    drawRight(g, row[2], left + columnW, rowY);
+  });
+
+  const lineY = y + h - ui(32);
+  setStroke(g, 1, false);
+  g.strokeStyle = rgba(T.INK, 20);
+  strokeLine(g, x + 16, lineY, x + w - 16, lineY);
+  setFont(g, MONO, false, 10);
+  g.fillStyle = rgba(T.MUTED);
+  g.fillText(`bucle ${SIMULATION_TICK_MS} ms · ${num(stepsPerSecond, 0)} pasos/s · ${compact(loopCount)} ciclos`,
+      x + 18, y + h - ui(13));
+}
+
+function modeColor(mode) {
+  return mode === LEARN ? T.CYAN : T.VIOLET;
+}
+
+/** Learning card: one bar per attempt (how long the pole stayed up) and the rule map. */
+function paintLearning(g, card) {
+  const { x, y, w, h } = card;
+  paintCard(g, x, y, w, h, 'APRENDIZAJE');
+  goalToggleBounds = paintGoalToggle(g, model.goalEnabled, x + w - 14, y + ui(10));
+  setFont(g, MONO, false, 10.5);
+  g.fillStyle = rgba(T.MUTED);
+  const titleEnd = x + 18 + ui(110);
+  let header = `intento ${model.episode}  ·  récord ${formatDuration(model.record, true)}`;
+  const right = goalToggleBounds.x - ui(12);
+  if (right - textWidth(g, header) < titleEnd) header = `n.º ${model.episode} · ${formatDuration(model.record, true)}`;
+  if (right - textWidth(g, header) >= titleEnd) drawRight(g, header, right, y + ui(25));
+
+  const showMap = w >= ui(380);
+  const mapSize = showMap ? Math.min(h - ui(78), ui(150)) : 0;
+  const chartLeft = x + ui(34);
+  const chartRight = x + w - 18 - (showMap ? mapSize + ui(30) : 0);
+  const chartTop = y + ui(44);
+  const chartBottom = y + h - ui(40);
+  paintLearningCurve(g, chartLeft, chartTop, chartRight, chartBottom);
+  paintLegend(g, chartLeft, chartRight, y + h - ui(14));
+  if (showMap) paintRuleMap(g, x + w - 18 - mapSize, chartTop, mapSize);
+}
+
+/** The goal switch (click or G); returns where it was drawn. */
+function paintGoalToggle(g, enabled, right, top) {
+  const label = enabled ? `Meta ${num(CartPoleModel.EPISODE_GOAL, 0)} s` : 'Sin meta';
+  const color = enabled ? T.GREEN : T.MUTED;
+  setFont(g, SANS, true, 10);
+  const trackW = ui(22);
+  const trackH = ui(12);
+  const pillH = ui(20);
+  const pillW = ui(8) + trackW + ui(6) + textWidth(g, label) + ui(10);
+  const pillX = right - pillW;
+  roundRectPath(g, pillX, top, pillW, pillH, pillH);
+  g.fillStyle = rgba(color, hoverGoalToggle ? 55 : 30);
+  g.fill();
+  if (hoverGoalToggle) {
+    setStroke(g, 1.2, false);
+    g.strokeStyle = rgba(color);
+    g.stroke();
+  }
+  const trackX = pillX + ui(8);
+  const trackTop = top + (pillH - trackH) / 2;
+  roundRectPath(g, trackX, trackTop, trackW, trackH, trackH);
+  g.fillStyle = enabled ? rgba(T.GREEN) : rgba(T.MUTED, 120);
+  g.fill();
+  const knobR = trackH / 2 - 2;
+  const knobX = enabled ? trackX + trackW - trackH / 2 : trackX + trackH / 2;
+  fillCircle(g, knobX, trackTop + trackH / 2, knobR, '#FFFFFF');
+  g.fillStyle = rgba(color);
+  g.fillText(label, trackX + trackW + ui(6), baselineIn(g, top, pillH));
+  return { x: pillX, y: top, w: pillW, h: pillH };
+}
+
+/** Smallest round scale (s) that fits the longest attempt, for charts without a goal. */
+function niceScale(longest) {
+  for (const step of [60, 120, 180, 300, 600, 900, 1200, 1800, 3600]) {
+    if (longest <= step) return step;
+  }
+  return Math.ceil(longest / 3600) * 3600;
+}
+
+function paintLearningCurve(g, left, top, right, bottom) {
+  const height = bottom - top;
+  const log = model.log;
+  // Vertical scale: the goal or, without a goal, the longest attempt on the chart.
+  let goal = CartPoleModel.EPISODE_GOAL;
+  if (!model.goalEnabled) {
+    let longest = model.time;
+    for (const entry of log) longest = Math.max(longest, entry.duration);
+    goal = niceScale(longest);
+  }
+
+  setFont(g, MONO, false, 9.5);
+  setStroke(g, 1, false);
+  for (let k = 0; k <= 4; k++) {
+    const seconds = goal * k / 4;
+    const gy = bottom - k / 4 * height;
+    g.strokeStyle = rgba(T.INK, k === 0 ? 40 : 14);
+    strokeLine(g, left, gy, right, gy);
+    g.fillStyle = rgba(T.MUTED);
+    drawRight(g, k === 0 ? '0' : formatDuration(seconds, false), left - 6, gy + 3.5);
+  }
+  if (model.goalEnabled) {
+    setStroke(g, 1.4, false, [5, 4]);
+    g.strokeStyle = rgba(T.GREEN, 200);
+    strokeLine(g, left, top, right, top);
+    g.setLineDash([]);
+    setFont(g, SANS, true, 9.5);
+    g.fillStyle = rgba(T.GREEN, 200);
+    drawRight(g, 'meta', right, top - 4);
+  }
+
+  const slots = Math.max(10, Math.trunc((right - left) / ui(5)));
+  const shown = Math.min(log.length, slots - 1); // the last slot is the current attempt
+  const first = log.length - shown;
+  const slot = (right - left) / slots;
+  const barW = Math.max(1.5, slot * 0.72);
+
+  if (log.length === 0 && model.time < 0.05) {
+    setFont(g, SANS, false, 11);
+    g.fillStyle = rgba(T.MUTED);
+    const hint = 'cada intento se convierte en una barra aquí';
+    g.fillText(hint, (left + right - textWidth(g, hint)) / 2, (top + bottom) / 2);
+  }
+
+  for (let i = 0; i < shown; i++) {
+    const entry = log[first + i];
+    const barH = Math.max(2, Math.min(entry.duration, goal) / goal * height);
+    const bx = left + i * slot + (slot - barW) / 2;
+    const color = entry.end === GOAL ? T.GREEN : modeColor(entry.mode);
+    roundRectPath(g, bx, bottom - barH, barW, barH, 3);
+    g.fillStyle = rgba(color, 200);
+    g.fill();
+  }
+
+  // Current attempt, still growing
+  const liveH = Math.max(2, Math.min(model.time, goal) / goal * height);
+  const liveX = left + shown * slot + (slot - barW) / 2;
+  const live = modeColor(model.mode);
+  roundRectPath(g, liveX, bottom - liveH, barW, liveH, 3);
+  g.fillStyle = rgba(live, 70);
+  g.fill();
+  setStroke(g, 1.2, false);
+  g.strokeStyle = rgba(live);
+  g.stroke();
+
+  // Moving average of the last 10 attempts: the learning trend
+  if (shown >= 2) {
+    g.beginPath();
+    for (let i = 0; i < shown; i++) {
+      let sum = 0;
+      let count = 0;
+      for (let k = Math.max(0, first + i - 9); k <= first + i; k++) {
+        sum += Math.min(log[k].duration, goal);
+        count++;
+      }
+      const px = left + i * slot + slot / 2;
+      const py = bottom - sum / count / goal * height;
+      if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+    }
+    setStroke(g, 5, true);
+    g.strokeStyle = rgba(T.PANEL, 160);
+    g.stroke();
+    setStroke(g, 2.2, true);
+    g.strokeStyle = rgba(T.TEXT);
+    g.stroke();
+  }
+}
+
+function paintLegend(g, x, maxX, baselineY) {
+  const labels = ['aprendiz', 'experto', 'meta alcanzada', 'media de 10'];
+  const colors = [T.CYAN, T.VIOLET, T.GREEN, T.TEXT];
+  setFont(g, SANS, false, 9.5);
+  let cx = x;
+  for (let i = 0; i < labels.length; i++) {
+    const labelW = textWidth(g, labels[i]);
+    if (cx + 16 + labelW > maxX) break; // no room left next to the rule map
+    if (i === labels.length - 1) {
+      setStroke(g, 2.2, true);
+      g.strokeStyle = rgba(colors[i]);
+      strokeLine(g, cx, baselineY - 4, cx + 12, baselineY - 4);
+    } else {
+      roundRectPath(g, cx + 2, baselineY - 9, 8, 9, 2);
+      g.fillStyle = rgba(colors[i]);
+      g.fill();
+    }
+    g.fillStyle = rgba(T.MUTED);
+    g.fillText(labels[i], cx + 16, baselineY);
+    cx += 16 + labelW + ui(10);
+  }
+}
+
+/**
+ * Map of the fuzzy rule base: the force it applies for each pole angle (horizontal) and
+ * angular velocity (vertical), with the cart stopped in the middle. Cyan pushes right,
+ * pink pushes left; it starts blank and fills in as the cart learns.
+ */
+function paintRuleMap(g, x, y, size) {
+  const cells = 26;
+  const cell = size / cells;
+  const forces = model.ruleForces();
+  const state = [0, 0, 0, 0];
+  for (let i = 0; i < cells; i++) {
+    for (let j = 0; j < cells; j++) {
+      state[0] = (-1 + 2 * (i + 0.5) / cells) * FuzzyRules.THETA_SCALE;
+      state[1] = (1 - 2 * (j + 0.5) / cells) * FuzzyRules.OMEGA_SCALE;
+      const f = FuzzyRules.infer(forces, state, heatmapPhi);
+      const intensity = Math.min(1, Math.abs(f) / MAX_FORCE_NEWTONS);
+      g.fillStyle = rgba(mix(T.FIELD, f >= 0 ? T.CYAN : T.PINK, intensity));
+      g.fillRect(x + i * cell, y + j * cell, cell + 0.6, cell + 0.6);
+    }
+  }
+  setStroke(g, 1, false);
+  g.strokeStyle = rgba(T.INK, 40);
+  strokeLine(g, x + size / 2, y, x + size / 2, y + size);
+  strokeLine(g, x, y + size / 2, x + size, y + size / 2);
+  g.strokeStyle = rgba(T.INK, 60);
+  g.strokeRect(x, y, size, size);
+
+  // Where the system is right now
+  const nx = Math.max(-1, Math.min(1, normalizeAngle(model.theta) / FuzzyRules.THETA_SCALE));
+  const ny = Math.max(-1, Math.min(1, model.thetaDot / FuzzyRules.OMEGA_SCALE));
+  const dotX = x + (nx + 1) / 2 * size;
+  const dotY = y + (1 - ny) / 2 * size;
+  setStroke(g, 2, false);
+  g.strokeStyle = rgba(T.INK, 220);
+  circlePath(g, dotX, dotY, 5);
+  g.stroke();
+  fillCircle(g, dotX, dotY, 2, T.dark ? '#FFFFFF' : rgba(T.INK));
+
+  setFont(g, SANS, false, 9.5);
+  g.fillStyle = rgba(T.MUTED);
+  g.fillText('ángulo θ →', x, y + size + ui(12));
+  drawRight(g, 'mapa de reglas', x + size, y + size + ui(12));
+  g.save();
+  g.translate(x - 5, y + size);
+  g.rotate(-Math.PI / 2);
+  g.fillText('vel. angular ω →', 0, 0);
+  g.restore();
+}
+
+/** Shows how the last attempt ended, for a moment. */
+function updateToast(now) {
+  if (model.endCounter === seenEndCounter) return;
+  if (seenEndCounter >= 0 && model.lastEnd) {
+    const episode = model.lastEndEpisode;
+    const duration = model.lastEndDuration;
+    if (model.lastEnd === GOAL) {
+      toastText = `¡Meta alcanzada! El intento ${episode} se equilibró ${num(duration, 0)} s`;
+      toastColor = T.GREEN;
+    } else if (model.lastEnd === HIT_WALL) {
+      toastText = `Chocó con el final del riel · intento ${episode} · ${num(duration, 1)} s`;
+      toastColor = T.AMBER;
+    } else {
+      toastText = `¡Se cayó! Intento ${episode} · ${num(duration, 1)} s`;
+      toastColor = T.ROSE;
+    }
+    toastStart = now;
+  }
+  seenEndCounter = model.endCounter;
+}
+
+function paintToast(g, w, now) {
+  const age = now - toastStart;
+  if (!toastText || age > 1.8) return;
+  const alpha = age < 1.2 ? 1 : 1 - (age - 1.2) / 0.6;
+  g.save();
+  g.globalAlpha = Math.max(0, alpha);
+  setFont(g, SANS, true, 12);
+  const pillW = textWidth(g, toastText) + ui(32);
+  const pillH = ui(30);
+  const pillX = (w - pillW) / 2;
+  const pillY = cardsBottom() + ui(14);
+  roundRectPath(g, pillX, pillY, pillW, pillH, pillH);
+  g.fillStyle = rgba(T.BG_TOP, 220);
+  g.fill();
+  setStroke(g, 1.4, false);
+  g.strokeStyle = rgba(toastColor);
+  g.stroke();
+  g.fillStyle = rgba(toastColor);
+  g.fillText(toastText, pillX + ui(16), baselineIn(g, pillY, pillH));
+  g.restore();
+}
+
+function paintFooter(g, w, h) {
+  setFont(g, SANS, false, 10);
+  g.fillStyle = rgba(T.MUTED);
+  const full = 'Espacio iniciar/detener  ·  R reiniciar  ·  M cambiar controlador  ·  '
+      + '← → empujón  ·  G meta  ·  T tema  ·  arrastra el carrito o la bolita';
+  const short = 'Arrastra el carrito o la bolita  ·  toca la meta para activarla o desactivarla';
+  const text = textWidth(g, full) <= w - 2 * HUD_MARGIN ? full : short;
+  if (textWidth(g, text) <= w - 2 * HUD_MARGIN) g.fillText(text, HUD_MARGIN, h - 12);
+}
+
+function paintStartHint(g, w, track, now) {
+  startHintBounds = null;
+  if (running || model.dragging) return;
+  const message = model.time === 0 ? 'Pulsa Espacio o Iniciar para empezar'
+      : 'En pausa · pulsa Espacio para continuar';
+  setFont(g, SANS, true, 13);
+  const pillW = textWidth(g, message) + ui(52);
+  const pillH = ui(34);
+  const pillX = (w - pillW) / 2;
+  const pillY = track + 46;
+  const pulse = 0.6 + 0.4 * Math.sin(now * 3);
+
+  roundRectPath(g, pillX, pillY, pillW, pillH, pillH);
+  g.fillStyle = rgba(T.BG_TOP, 210);
+  g.fill();
+  setStroke(g, 1.4, false);
+  g.strokeStyle = rgba(T.CYAN, Math.trunc(60 + 130 * pulse));
+  g.stroke();
+
+  const cy = pillY + pillH / 2;
+  g.beginPath();
+  g.moveTo(pillX + ui(18), cy - ui(6));
+  g.lineTo(pillX + ui(29), cy);
+  g.lineTo(pillX + ui(18), cy + ui(6));
+  g.closePath();
+  g.fillStyle = rgba(T.CYAN);
+  g.fill();
+
+  g.fillStyle = rgba(T.TEXT);
+  g.fillText(message, pillX + ui(38), baselineIn(g, pillY, pillH));
+  startHintBounds = { x: pillX, y: pillY, w: pillW, h: pillH };
+}
+
+// ----- mouse and touch interaction -----
+
+function inside(rect, x, y) {
+  return rect && x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+}
+
+function hitTest(mx, my) {
+  const track = trackY();
+  const py = pivotY(track);
+  const cx = screenX(model.x);
+  const tipX = cx + POLE_PX * Math.sin(model.theta);
+  const tipY = py - POLE_PX * Math.cos(model.theta);
+  if (Math.hypot(mx - tipX, my - tipY) <= BOB_R + 9) return HIT_BOB;
+  if (mx >= cx - CART_W / 2 - 6 && mx <= cx + CART_W / 2 + 6
+      && my >= bodyTop(track) - 26 && my <= track + 4) {
+    return HIT_CART;
+  }
+  return HIT_NONE;
+}
+
+/** Pointer position in the scene's logical pixels. */
+function scenePoint(e) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (e.clientX - rect.left) / view.scale, y: (e.clientY - rect.top) / view.scale };
+}
+
+function updateHover(x, y) {
+  hoverGoalToggle = inside(goalToggleBounds, x, y);
+  if (hoverGoalToggle || inside(startHintBounds, x, y)) {
+    pointer.hoverBob = false;
+    pointer.hoverCart = false;
+    canvas.style.cursor = 'pointer';
+    return;
+  }
+  const hit = hitTest(x, y);
+  pointer.hoverBob = hit === HIT_BOB;
+  pointer.hoverCart = hit === HIT_CART;
+  canvas.style.cursor = hit === HIT_NONE ? 'default' : 'pointer';
+}
+
+function clampMagnitude(value, limit) {
+  return Math.max(-limit, Math.min(limit, value));
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.focus({ preventScroll: true });
+  if (e.button !== 0) return;
+  const p = scenePoint(e);
+  if (inside(goalToggleBounds, p.x, p.y)) {
+    toggleGoal();
+    return;
+  }
+  if (inside(startHintBounds, p.x, p.y)) {
+    startSimulation();
+    return;
+  }
+  const hit = hitTest(p.x, p.y);
+  if (hit === HIT_NONE) return;
+  pointer.grabbingPole = hit === HIT_BOB;
+  pointer.grabbingCart = hit === HIT_CART;
+  if (pointer.grabbingCart) {
+    pointer.grabOffsetPx = p.x - screenX(model.x);
+    pointer.lastDragValue = model.x;
+  } else {
+    pointer.lastDragValue = model.theta;
+  }
+  pointer.lastDragMillis = performance.now();
+  pointer.flingVelocity = 0;
+  pointer.id = e.pointerId;
+  canvas.setPointerCapture(e.pointerId);
+  model.setDragging(true);
+  canvas.style.cursor = 'move';
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = scenePoint(e);
+  if (!pointer.grabbingCart && !pointer.grabbingPole) {
+    updateHover(p.x, p.y);
+    return;
+  }
+  let value;
+  if (pointer.grabbingCart) {
+    value = (p.x - pointer.grabOffsetPx - view.W / 2) / PIXELS_PER_METER;
+    model.moveCart(value);
+  } else {
+    const pivotX = screenX(model.x);
+    const angle = Math.atan2(p.x - pivotX, pivotY(trackY()) - p.y);
+    model.rotatePole(angle);
+    value = pointer.lastDragValue + normalizeAngle(angle - pointer.lastDragValue); // continuous angle
+  }
+  const now = performance.now();
+  const dt = (now - pointer.lastDragMillis) / 1000;
+  if (dt > 1e-3) {
+    const velocity = (value - pointer.lastDragValue) / dt;
+    pointer.flingVelocity = 0.65 * velocity + 0.35 * pointer.flingVelocity;
+    pointer.lastDragValue = value;
+    pointer.lastDragMillis = now;
+  }
+});
+
+function releasePointer(e) {
+  if (!pointer.grabbingCart && !pointer.grabbingPole) return;
+  const idle = (performance.now() - pointer.lastDragMillis) / 1000;
+  const velocity = idle > 0.08 ? 0 : pointer.flingVelocity; // the user stopped before releasing
+  if (pointer.grabbingCart) {
+    model.releaseCart(clampMagnitude(velocity, MAX_FLING_CART));
+  } else {
+    model.releasePole(clampMagnitude(velocity, MAX_FLING_POLE));
+  }
+  pointer.grabbingCart = false;
+  pointer.grabbingPole = false;
+  pointer.id = null;
+  const p = scenePoint(e);
+  updateHover(p.x, p.y);
+}
+
+canvas.addEventListener('pointerup', releasePointer);
+canvas.addEventListener('pointercancel', releasePointer);
+canvas.addEventListener('pointerleave', () => {
+  if (!pointer.grabbingCart && !pointer.grabbingPole) {
+    pointer.hoverBob = false;
+    pointer.hoverCart = false;
+    hoverGoalToggle = false;
+    canvas.style.cursor = 'default';
+  }
+});
+
+// On touch screens, grabbing the cart or the bob must not scroll the page.
+canvas.addEventListener('touchstart', e => {
+  const touch = e.touches[0];
+  if (!touch) return;
+  const p = scenePoint(touch);
+  if (hitTest(p.x, p.y) !== HIT_NONE) e.preventDefault();
+}, { passive: false });
+
+// ---------------------------------------------------------------------------
+// Startup
+// ---------------------------------------------------------------------------
+
+/** Copies every slider value into the model (used once, at startup). */
+function applySettings() {
+  speed = speedInput.getValue();
+  model.learningRate = learningRateInput.getValue();
+  model.exploration = explorationInput.getValue();
+  model.initialAngle = toRadians(initialAngleInput.getValue());
+  model.pushStrength = pushInput.getValue();
+  model.pushChance = pushChanceInput.getValue() / 100;
+  model.expertSkill = expertSkillInput.getValue() / 100;
+  model.setMasses(cartMassInput.getValue(), poleMassInput.getValue());
+  layout();
+  model.trackHalf = trackHalfFor(view.W);
+  model.restartEpisode();
+}
+
+buildSidebar();
+applyTheme(loadDarkTheme());
+applySettings();
+updateButtons();
+// Sliders are drawn at their real width once the layout exists (and again on resize).
+new ResizeObserver(() => allSliders.forEach(slider => slider.paint())).observe(document.getElementById('sidebar'));
+canvas.focus({ preventScroll: true });
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

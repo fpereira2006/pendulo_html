@@ -118,14 +118,16 @@
     /* On small screens the header moves to the top of the page (see placeHeader). */
     #app > .header {
       height: auto; align-items: center;
-      padding: 10px 16px;
+      padding: 6px 16px;
       background: var(--panel);
       border-bottom: 1px solid var(--panel-border);
     }
-    #app > .header .logo { margin-top: 0; }
-    #app > .header h1 { padding-top: 0; }
-    #app > .header .subtitle { margin-top: 6px; }
-    #app > .header .theme-toggle { margin-top: 0; }
+    #app > .header .logo { width: 36px; height: 36px; margin-top: 0; }
+    #app > .header .titles { margin-left: 12px; }
+    #app > .header h1 { padding-top: 0; font-size: 16px; }
+    #app > .header .subtitle { margin-top: 3px; font-size: 11.5px; }
+    #app > .header .theme-toggle,
+    #app > .header .theme-toggle canvas { width: 26px; height: 26px; margin-top: 0; }
     /* The simulation speed slider sits right below the scene (see placeSpeedSlider). */
     #speedBar {
       display: block;

@@ -100,6 +100,7 @@
   .btn.secondary:active:not(:disabled) { background: var(--bg-pressed); }
   .btn:disabled { opacity: 0.35; cursor: default; }
   #btForget { margin-top: 8px; }
+  #speedBar { display: none; }
 
   /* Narrow windows: the scene on top, the controls below it. */
   @media (max-width: 999px) {
@@ -125,6 +126,13 @@
     #app > .header h1 { padding-top: 0; }
     #app > .header .subtitle { margin-top: 6px; }
     #app > .header .theme-toggle { margin-top: 0; }
+    /* The simulation speed slider sits right below the scene (see placeSpeedSlider). */
+    #speedBar {
+      display: block;
+      padding: 6px 16px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--panel-border);
+    }
     .group-controller, .group-learning, .group-environment { order: 2; }
   }
   @media (max-width: 380px) {
@@ -136,6 +144,7 @@
 <body>
 <div id="app">
   <main id="stage"><canvas id="scene" tabindex="0" aria-label="Simulação do pêndulo invertido"></canvas></main>
+  <div id="speedBar"></div>
   <aside id="sidebar">
     <div class="header">
       <canvas class="logo" id="logo" width="53" height="53" aria-hidden="true"></canvas>
@@ -1075,7 +1084,11 @@ class ValueSlider {
     };
     this.canvas.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;
-      this.canvas.setPointerCapture(e.pointerId);
+      try {
+        this.canvas.setPointerCapture(e.pointerId);
+      } catch (err) {
+        // Capture is only a convenience; the slider still works without it.
+      }
       this.dragging = true;
       fromPointer(e);
       e.preventDefault();
@@ -2903,13 +2916,31 @@ function placeHeader() {
   }
 }
 
+/** Small screens: the speed slider goes right below the scene; wide screens: back in the sidebar. */
+function placeSpeedSlider() {
+  const bar = document.getElementById('speedBar');
+  const slot = document.getElementById('learningSlot');
+  if (window.matchMedia('(max-width: 999px)').matches) {
+    if (speedInput.element.parentElement !== bar) bar.appendChild(speedInput.element);
+  } else if (speedInput.element.parentElement !== slot) {
+    slot.insertBefore(speedInput.element, slot.firstChild);
+  }
+  speedInput.paint();
+}
+
 placeHeader();
-window.matchMedia('(max-width: 999px)').addEventListener('change', placeHeader);
 buildSidebar();
+placeSpeedSlider();
+window.matchMedia('(max-width: 999px)').addEventListener('change', () => {
+  placeHeader();
+  placeSpeedSlider();
+});
 applyTheme(loadDarkTheme());
 applySettings();
 // Sliders are drawn at their real width once the layout exists (and again on resize).
-new ResizeObserver(() => allSliders.forEach(slider => slider.paint())).observe(document.getElementById('sidebar'));
+const repaintSliders = new ResizeObserver(() => allSliders.forEach(slider => slider.paint()));
+repaintSliders.observe(document.getElementById('sidebar'));
+repaintSliders.observe(document.getElementById('speedBar'));
 canvas.focus({ preventScroll: true });
 requestAnimationFrame(render);
 </script>

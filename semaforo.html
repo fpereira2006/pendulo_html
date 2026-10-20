@@ -1,0 +1,2986 @@
+<!doctype html>
+<!--
+  Traffic lights that learn: the same theory as the inverted pendulum (pendulo.html) applied
+  to an intersection. A fuzzy rule base (75 rules) decides, every second of green, whether to
+  keep the green or switch; a fuzzy actor-critic learns those rules only from how many cars are
+  waiting. Cars follow the Intelligent Driver Model. A single HTML file: open it in a browser.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Traffic lights · Learning to open the green</title>
+<meta name="description" content="Traffic lights with fuzzy logic and reinforcement learning.">
+<style>
+  :root {
+    --sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Inter, Roboto, system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --bg-top: #070B1A;
+    --panel: #0D1327;
+    --panel-border: #232C4C;
+    --field: #161E3B;
+    --text: #E6EAF5;
+    --muted: #8A94B8;
+    --cyan: #38BDF8;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg-top);
+    color: var(--text);
+    font-family: var(--sans);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app { display: flex; height: 100vh; height: 100dvh; }
+  #stage { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  #scene { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-select: none; touch-action: manipulation; outline: none; }
+
+  #sidebar {
+    flex: 0 0 336px;
+    width: 336px;
+    padding: 14px 22px 14px 23px;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-border);
+    overflow-y: auto;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .header { display: flex; align-items: flex-start; height: 67px; gap: 0; }
+  .header .logo { width: 53px; height: 53px; margin-top: 4px; flex: none; }
+  .header .titles { margin-left: 16px; flex: 1; min-width: 0; }
+  .header h1 { margin: 0; font-size: 18px; font-weight: 700; line-height: 1; padding-top: 11px; white-space: nowrap; }
+  .header .subtitle { margin-top: 10px; font-size: 14.4px; color: var(--muted); white-space: nowrap; }
+  .theme-toggle { width: 29px; height: 29px; margin-top: 4px; padding: 0; border: 0; background: none; cursor: pointer; flex: none; }
+  .theme-toggle canvas { display: block; width: 29px; height: 29px; }
+
+  .section-title {
+    display: flex; align-items: center; gap: 12px;
+    height: 26px; margin-top: 8px; padding-top: 5px;
+    font-size: 12.6px; font-weight: 700; letter-spacing: 0.14em; color: var(--muted);
+  }
+  .section-title::after { content: ""; flex: 1; height: 1px; background: var(--panel-border); }
+
+  .segmented {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    height: 38px; margin-top: 6px; padding: 3px; gap: 4px;
+    background: var(--field); border-radius: 6px;
+  }
+  .segmented button {
+    border: 0; border-radius: 4.5px; cursor: pointer; padding: 0 2px;
+    font: 700 13px var(--sans); color: var(--muted); background: transparent;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .segmented button:hover { background: var(--seg-hover); }
+  .segmented button.selected { background: var(--seg-accent); color: var(--seg-text); }
+  .mode-description { margin-top: 6px; font-size: 12.6px; line-height: 1.3; color: var(--muted); }
+
+  .slider { margin-top: 2px; }
+  .slider.first { margin-top: 4px; }
+  .slider .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .slider .name { font-size: 15.6px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .slider .value { font: 700 14.4px var(--mono); white-space: nowrap; }
+  .slider canvas { display: block; width: 100%; height: 23px; cursor: pointer; touch-action: none; }
+
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    height: 48px; width: 100%; padding: 0 4px;
+    border-radius: 6px; cursor: pointer;
+    font: 700 14.4px var(--sans); color: var(--fg);
+    white-space: nowrap; overflow: hidden;
+  }
+  .btn canvas { width: 15px; height: 15px; flex: none; }
+  .btn.secondary { border: 1.2px solid var(--border); background: var(--bg); }
+  .btn.secondary:hover:not(:disabled) { border-color: var(--border-hover); background: var(--bg-hover); }
+  .btn.secondary:active:not(:disabled) { background: var(--bg-pressed); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  #btForget { margin-top: 8px; }
+  #speedBar { display: none; }
+
+  /* Narrow windows: the scene on top, the controls below it. */
+  @media (max-width: 999px) {
+    body { overflow: auto; }
+    #app { flex-direction: column; height: auto; }
+    #stage { flex: none; height: var(--stage-height, 70vh); }
+    #sidebar {
+      flex: none; width: auto;
+      border-left: 0; border-top: 1px solid var(--panel-border);
+      padding: 14px 16px 28px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      column-gap: 32px; align-content: start; overflow: visible;
+    }
+    .header { grid-column: 1 / -1; }
+    /* On small screens the header moves to the top of the page (see placeHeader). */
+    #app > .header {
+      height: auto; align-items: center;
+      padding: 6px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--panel-border);
+    }
+    #app > .header .logo { width: 36px; height: 36px; margin-top: 0; }
+    #app > .header .titles { margin-left: 12px; }
+    #app > .header h1 { padding-top: 0; font-size: 16px; }
+    #app > .header .subtitle { margin-top: 3px; font-size: 11.5px; }
+    #app > .header .theme-toggle,
+    #app > .header .theme-toggle canvas { width: 26px; height: 26px; margin-top: 0; }
+    /* The simulation speed slider sits right below the scene (see placeSpeedSlider). */
+    #speedBar {
+      display: block;
+      padding: 6px 16px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--panel-border);
+    }
+    .group-controller, .group-learning, .group-environment { order: 2; }
+  }
+  @media (max-width: 380px) {
+    .header h1 { font-size: 18px; }
+    .header .subtitle { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <main id="stage"><canvas id="scene" tabindex="0" aria-label="Traffic light simulation"></canvas></main>
+  <div id="speedBar"></div>
+  <aside id="sidebar">
+    <div class="header">
+      <canvas class="logo" id="logo" width="53" height="53" aria-hidden="true"></canvas>
+      <div class="titles">
+        <h1 data-i18n="heading">Smart Traffic Lights</h1>
+        <div class="subtitle">fuzzy &nbsp;·&nbsp; <span data-i18n="learningWord">learning</span> &nbsp;·&nbsp; IDM</div>
+      </div>
+      <button class="theme-toggle" id="themeToggle" tabindex="-1"><canvas id="themeIcon" width="29" height="29"></canvas></button>
+    </div>
+
+    <section class="group-controller">
+      <div class="section-title" data-i18n="controller">CONTROLLER</div>
+      <div class="segmented" id="modeControl">
+        <button tabindex="-1" data-index="0" data-i18n="learner">Learner</button>
+        <button tabindex="-1" data-index="1" data-i18n="expert">Expert</button>
+        <button tabindex="-1" data-index="2" data-i18n="fixed">Fixed time</button>
+      </div>
+      <div class="mode-description" id="modeDescription"></div>
+      <div id="controllerSlot"></div>
+    </section>
+
+    <section class="group-learning">
+      <div class="section-title" data-i18n="learningSection">LEARNING</div>
+      <div id="learningSlot"></div>
+      <button class="btn secondary" id="btForget" tabindex="-1"></button>
+    </section>
+
+    <section class="group-environment">
+      <div class="section-title" data-i18n="environment">TRAFFIC</div>
+      <div id="environmentSlot"></div>
+    </section>
+
+  </aside>
+</div>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const SIMULATION_TICK_MS = 4;
+const MAX_CATCH_UP = 0.1;       // s of wall clock per tick, avoids a "spiral of death"
+const HUD_MARGIN = 16;
+const FONT_SCALE = 1.2;
+const STAR_COUNT = 120;
+
+/** Scales a layout size designed for 1x fonts, so cards and panels grow with the text. */
+function ui(base) {
+  return Math.round(base * FONT_SCALE);
+}
+
+// ---------------------------------------------------------------------------
+// Languages: Portuguese, Spanish and English, chosen from the browser settings
+// ---------------------------------------------------------------------------
+
+const STRINGS = {
+  pt: {
+    htmlLang: 'pt-BR',
+    decimal: ',',
+    thousands: '.',
+    title: 'Semáforo · Aprendendo a abrir o verde',
+    description: 'Semáforos com lógica fuzzy e aprendizado por reforço.',
+    sceneLabel: 'Simulação de um cruzamento com semáforos',
+    heading: 'Semáforo Inteligente',
+    learningWord: 'aprendizado',
+    controller: 'CONTROLADOR',
+    learner: 'Aprendiz',
+    expert: 'Especialista',
+    fixed: 'Tempo fixo',
+    learningSection: 'APRENDIZADO',
+    environment: 'TRÂNSITO',
+    speed: 'Velocidade da simulação',
+    learningRate: 'Taxa de aprendizado',
+    exploration: 'Exploração (ruído)',
+    fixedGreen: 'Verde do tempo fixo',
+    flowNS: 'Fluxo norte–sul',
+    flowEW: 'Fluxo leste–oeste',
+    perMinute: '/min',
+    variation: 'Variação (hora do rush)',
+    burstSize: 'Tamanho da rajada',
+    cars: n => (n === 1 ? '1 carro' : `${n} carros`),
+    forget: 'Esquecer o que aprendeu',
+    learnDescription: 'Fuzzy + aprendizado por reforço: começa sem saber nada e aprende com os carros parados.',
+    expertDescription: 'Regras fixas da engenharia de tráfego: atende a fila maior sem cortar um verde que ainda flui.',
+    fixedDescription: 'Plano clássico: cada via fica verde pelo mesmo tempo, haja carro ou não.',
+    toLightTheme: 'Mudar para o tema claro (T)',
+    toDarkTheme: 'Mudar para o tema escuro (T)',
+    roads: ['N–S', 'L–O'],
+    burst: 'rajada de carros',
+    telemetry: 'TELEMETRIA',
+    running: 'RODANDO',
+    paused: 'PAUSADO',
+    phase: 'sinal',
+    phaseGreen: (road, s) => `${road} verde ${s}`,
+    phaseYellow: road => `${road} amarelo`,
+    phaseAllRed: 'todos vermelhos',
+    queue: road => `fila ${road}`,
+    delay: 'espera média',
+    delayShort: 'espera',
+    decision: 'decisão',
+    keep: 'manter',
+    change: 'trocar',
+    fixedIn: s => `troca em ${s}`,
+    loop: (clock, flow, switches) => `${clock} · vazão ${flow}/min · ${switches} trocas`,
+    efficiency: 'eficiência',
+    viewEfficiency: 'eficiência',
+    viewWait: 'espera',
+    efficiencyVersus: (a, b) => `${a} · tempo fixo ${b}`,
+    periodHeader: minutes => `${minutes} min por barra`,
+    versusFixed: pct => `${pct} vs tempo fixo`,
+    emptyChart: 'a cada 2 minutos, o desempenho vira uma barra aqui',
+    legend: ['aprendiz', 'especialista', 'tempo fixo', 'referência', 'média de 10'],
+    mapGreen: 'carros no verde →',
+    mapTitle: 'mapa das regras',
+    mapRed: 'no vermelho →',
+    toastBurst: (n, road) => `+${n} carros no ${road}`,
+    toastSwitch: road => `Troca manual · abrindo ${road}`,
+    footer: 'Espaço iniciar/pausar  ·  R reiniciar  ·  M trocar controlador  ·  S trocar o sinal  ·  E gráfico  ·  '
+        + '↑↓ ←→ rajada  ·  T tema  ·  clique no cruzamento para trocar o sinal',
+    footerShort: 'Toque no cruzamento para trocar o sinal',
+    start: 'Iniciar',
+    pause: 'Pausar',
+    restart: 'Reiniciar',
+  },
+  es: {
+    htmlLang: 'es',
+    decimal: ',',
+    thousands: '.',
+    title: 'Semáforo · Aprendiendo a dar el verde',
+    description: 'Semáforos con lógica fuzzy y aprendizaje por refuerzo.',
+    sceneLabel: 'Simulación de un cruce con semáforos',
+    heading: 'Semáforo Inteligente',
+    learningWord: 'aprendizaje',
+    controller: 'CONTROLADOR',
+    learner: 'Aprendiz',
+    expert: 'Experto',
+    fixed: 'Tiempo fijo',
+    learningSection: 'APRENDIZAJE',
+    environment: 'TRÁFICO',
+    speed: 'Velocidad de la simulación',
+    learningRate: 'Tasa de aprendizaje',
+    exploration: 'Exploración (ruido)',
+    fixedGreen: 'Verde del tiempo fijo',
+    flowNS: 'Flujo norte–sur',
+    flowEW: 'Flujo este–oeste',
+    perMinute: '/min',
+    variation: 'Variación (hora punta)',
+    burstSize: 'Tamaño de la ráfaga',
+    cars: n => (n === 1 ? '1 coche' : `${n} coches`),
+    forget: 'Olvidar lo aprendido',
+    learnDescription: 'Fuzzy + aprendizaje por refuerzo: empieza sin saber nada y aprende de los coches parados.',
+    expertDescription: 'Reglas fijas de la ingeniería de tráfico: atiende la cola mayor sin cortar un verde que aún fluye.',
+    fixedDescription: 'Plan clásico: cada vía tiene verde el mismo tiempo, haya coches o no.',
+    toLightTheme: 'Cambiar al tema claro (T)',
+    toDarkTheme: 'Cambiar al tema oscuro (T)',
+    roads: ['N–S', 'E–O'],
+    burst: 'ráfaga de coches',
+    telemetry: 'TELEMETRÍA',
+    running: 'EN MARCHA',
+    paused: 'EN PAUSA',
+    phase: 'señal',
+    phaseGreen: (road, s) => `${road} verde ${s}`,
+    phaseYellow: road => `${road} ámbar`,
+    phaseAllRed: 'todo en rojo',
+    queue: road => `cola ${road}`,
+    delay: 'espera media',
+    delayShort: 'espera',
+    decision: 'decisión',
+    keep: 'mantener',
+    change: 'cambiar',
+    fixedIn: s => `cambia en ${s}`,
+    loop: (clock, flow, switches) => `${clock} · flujo ${flow}/min · ${switches} cambios`,
+    efficiency: 'eficiencia',
+    viewEfficiency: 'eficiencia',
+    viewWait: 'espera',
+    efficiencyVersus: (a, b) => `${a} · tiempo fijo ${b}`,
+    periodHeader: minutes => `${minutes} min por barra`,
+    versusFixed: pct => `${pct} vs tiempo fijo`,
+    emptyChart: 'cada 2 minutos, el desempeño se convierte en una barra aquí',
+    legend: ['aprendiz', 'experto', 'tiempo fijo', 'referencia', 'media de 10'],
+    mapGreen: 'coches en verde →',
+    mapTitle: 'mapa de reglas',
+    mapRed: 'en rojo →',
+    toastBurst: (n, road) => `+${n} coches en la ${road}`,
+    toastSwitch: road => `Cambio manual · abriendo ${road}`,
+    footer: 'Espacio iniciar/pausar  ·  R reiniciar  ·  M cambiar controlador  ·  S cambiar la señal  ·  E gráfico  ·  '
+        + '↑↓ ←→ ráfaga  ·  T tema  ·  haz clic en el cruce para cambiar la señal',
+    footerShort: 'Toca el cruce para cambiar la señal',
+    start: 'Iniciar',
+    pause: 'Pausar',
+    restart: 'Reiniciar',
+  },
+  en: {
+    htmlLang: 'en',
+    decimal: '.',
+    thousands: ',',
+    title: 'Traffic lights · Learning to open the green',
+    description: 'Traffic lights with fuzzy logic and reinforcement learning.',
+    sceneLabel: 'Simulation of an intersection with traffic lights',
+    heading: 'Smart Traffic Lights',
+    learningWord: 'learning',
+    controller: 'CONTROLLER',
+    learner: 'Learner',
+    expert: 'Expert',
+    fixed: 'Fixed time',
+    learningSection: 'LEARNING',
+    environment: 'TRAFFIC',
+    speed: 'Simulation speed',
+    learningRate: 'Learning rate',
+    exploration: 'Exploration (noise)',
+    fixedGreen: 'Fixed-time green',
+    flowNS: 'North–south flow',
+    flowEW: 'East–west flow',
+    perMinute: '/min',
+    variation: 'Variation (rush hour)',
+    burstSize: 'Burst size',
+    cars: n => (n === 1 ? '1 car' : `${n} cars`),
+    forget: 'Forget what it learned',
+    learnDescription: 'Fuzzy + reinforcement learning: starts knowing nothing and learns from the cars kept waiting.',
+    expertDescription: 'Fixed traffic engineering rules: serve the longer queue without cutting a green that still flows.',
+    fixedDescription: 'Classic plan: each road gets the same green time, cars or no cars.',
+    toLightTheme: 'Switch to the light theme (T)',
+    toDarkTheme: 'Switch to the dark theme (T)',
+    roads: ['N–S', 'E–W'],
+    burst: 'burst of cars',
+    telemetry: 'TELEMETRY',
+    running: 'RUNNING',
+    paused: 'PAUSED',
+    phase: 'signal',
+    phaseGreen: (road, s) => `${road} green ${s}`,
+    phaseYellow: road => `${road} yellow`,
+    phaseAllRed: 'all red',
+    queue: road => `${road} queue`,
+    delay: 'average wait',
+    delayShort: 'wait',
+    decision: 'decision',
+    keep: 'keep',
+    change: 'switch',
+    fixedIn: s => `switch in ${s}`,
+    loop: (clock, flow, switches) => `${clock} · flow ${flow}/min · ${switches} switches`,
+    efficiency: 'efficiency',
+    viewEfficiency: 'efficiency',
+    viewWait: 'wait',
+    efficiencyVersus: (a, b) => `${a} · fixed time ${b}`,
+    periodHeader: minutes => `${minutes} min per bar`,
+    versusFixed: pct => `${pct} vs fixed time`,
+    emptyChart: 'every 2 minutes, the performance becomes a bar here',
+    legend: ['learner', 'expert', 'fixed time', 'reference', 'average of 10'],
+    mapGreen: 'cars on green →',
+    mapTitle: 'rule map',
+    mapRed: 'on red →',
+    toastBurst: (n, road) => `+${n} cars on ${road}`,
+    toastSwitch: road => `Manual switch · opening ${road}`,
+    footer: 'Space start/pause  ·  R restart  ·  M switch controller  ·  S switch the lights  ·  E chart  ·  '
+        + '↑↓ ←→ burst  ·  T theme  ·  click the intersection to switch the lights',
+    footerShort: 'Tap the intersection to switch the lights',
+    start: 'Start',
+    pause: 'Pause',
+    restart: 'Restart',
+  },
+};
+
+/**
+ * The language comes from the browser settings (first supported one in the user's list);
+ * anything else falls back to English. "?lang=pt|es|en" in the address forces one.
+ */
+function pickLanguage() {
+  try {
+    const forced = new URLSearchParams(location.search).get('lang');
+    if (forced && STRINGS[forced]) return forced;
+  } catch (e) {
+    // Ignore a malformed address.
+  }
+  const preferred = navigator.languages && navigator.languages.length
+      ? navigator.languages : [navigator.language || 'en'];
+  for (const tag of preferred) {
+    const code = String(tag).toLowerCase().split('-')[0];
+    if (STRINGS[code]) return code;
+  }
+  return 'en';
+}
+
+const LANG = pickLanguage();
+const L = STRINGS[LANG];
+
+/** Puts the chosen language on the static parts of the page. */
+function applyLanguage() {
+  document.documentElement.lang = L.htmlLang;
+  document.title = L.title;
+  document.querySelector('meta[name="description"]').content = L.description;
+  document.getElementById('scene').setAttribute('aria-label', L.sceneLabel);
+  for (const element of document.querySelectorAll('[data-i18n]')) {
+    element.textContent = L[element.dataset.i18n];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Formatting (decimal comma in Portuguese and Spanish, point in English)
+// ---------------------------------------------------------------------------
+
+function num(value, digits) {
+  return value.toFixed(digits).replace('.', L.decimal);
+}
+
+function grouped(value) {
+  return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, L.thousands);
+}
+
+function compact(value) {
+  if (value < 1000) return String(value);
+  if (value < 1e6) return num(value / 1e3, 1) + 'k';
+  return num(value / 1e6, 1) + 'M';
+}
+
+function formatSeconds(seconds) {
+  if (seconds < 100) return num(seconds, 0) + ' s';
+  return num(seconds / 60, 1) + ' min';
+}
+
+function formatClock(seconds) {
+  const total = Math.floor(seconds);
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor(total / 60) % 60)}:${pad(total % 60)}`;
+}
+
+function toRadians(deg) {
+  return deg * Math.PI / 180;
+}
+
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+
+function hex(value) {
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+const WHITE = [255, 255, 255];
+const BLACK = [0, 0, 0];
+
+/** CSS color from [r, g, b] (alpha 0..255). */
+function rgba(color, alpha) {
+  const a = alpha === undefined ? (color.length > 3 ? color[3] : 255) : alpha;
+  return `rgba(${color[0]},${color[1]},${color[2]},${Math.max(0, Math.min(255, a)) / 255})`;
+}
+
+function mix(a, b, t) {
+  const k = Math.max(0, Math.min(1, t));
+  return [0, 1, 2].map(i => Math.round(a[i] + (b[i] - a[i]) * k));
+}
+
+const T = { dark: true, version: 0 };
+
+function applyPalette(dark) {
+  T.dark = dark;
+  T.version++;
+  if (dark) {
+    Object.assign(T, {
+      BG_TOP: hex(0x070B1A), BG_MID: hex(0x121B3D),
+      PANEL: hex(0x0D1327), PANEL_BORDER: hex(0x232C4C), FIELD: hex(0x161E3B), CARD: [14, 20, 42, 215],
+      TEXT: hex(0xE6EAF5), MUTED: hex(0x8A94B8), CYAN: hex(0x38BDF8), TEAL: hex(0x2DD4BF),
+      PINK: hex(0xF472B6), VIOLET: hex(0x818CF8), AMBER: hex(0xFBBF24), ROSE: hex(0xFB7185),
+      GREEN: hex(0x4ADE80), INK: WHITE, SILVER: hex(0xCBD5E1),
+      ASPHALT: hex(0x10162C), SIDEWALK: hex(0x1E2747), BLOCK: hex(0x0B1022), ROOF: hex(0x1A2347),
+      MARKING: hex(0xE6EAF5), LAMP_OFF: hex(0x1B2240), HOUSING: hex(0x05070F),
+    });
+  } else {
+    Object.assign(T, {
+      BG_TOP: hex(0xF5F8FD), BG_MID: hex(0xDCE6F6),
+      PANEL: hex(0xFFFFFF), PANEL_BORDER: hex(0xD8DFEB), FIELD: hex(0xE2E8F2), CARD: [255, 255, 255, 225],
+      TEXT: hex(0x1C2436), MUTED: hex(0x5E6A84), CYAN: hex(0x0284C7), TEAL: hex(0x0D9488),
+      PINK: hex(0xDB2777), VIOLET: hex(0x4F46E5), AMBER: hex(0xD97706), ROSE: hex(0xE11D48),
+      GREEN: hex(0x16A34A), INK: hex(0x0F172A), SILVER: hex(0x64748B),
+      ASPHALT: hex(0x6B7891), SIDEWALK: hex(0xC9D3E3), BLOCK: hex(0xDCE6F2), ROOF: hex(0xB9C6DA),
+      MARKING: hex(0xFFFFFF), LAMP_OFF: hex(0x2A3247), HOUSING: hex(0x1C2436),
+    });
+  }
+}
+
+// The last chosen theme is remembered between runs (browser storage).
+const THEME_KEY = 'semaforo.theme';
+
+function loadDarkTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) !== 'light';
+  } catch (e) {
+    return true;
+  }
+}
+
+function saveTheme(dark) {
+  try {
+    localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
+  } catch (e) {
+    // Not being able to save the preference must never break the app.
+  }
+}
+
+applyPalette(loadDarkTheme()); // components read the palette as soon as they are built
+
+const SANS = getComputedStyle(document.documentElement).getPropertyValue('--sans').trim() || 'sans-serif';
+const MONO = getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace';
+const HAS_LETTER_SPACING = 'letterSpacing' in CanvasRenderingContext2D.prototype;
+
+/** Sets a canvas font; sizes are nominal and get FONT_SCALE. */
+function setFont(g, family, bold, size, tracking) {
+  const px = size * FONT_SCALE;
+  g.font = `${bold ? 700 : 400} ${px}px ${family}`;
+  if (HAS_LETTER_SPACING) g.letterSpacing = tracking ? `${tracking * px}px` : '0px';
+}
+
+// ---------------------------------------------------------------------------
+// Canvas helpers
+// ---------------------------------------------------------------------------
+
+function circlePath(g, cx, cy, r) {
+  g.beginPath();
+  g.arc(cx, cy, Math.max(0, r), 0, Math.PI * 2);
+}
+
+function fillCircle(g, cx, cy, r, style) {
+  circlePath(g, cx, cy, r);
+  g.fillStyle = style;
+  g.fill();
+}
+
+/** Rounded rectangle; arc is the corner diameter. */
+function roundRectPath(g, x, y, w, h, arc) {
+  const r = Math.max(0, Math.min(arc / 2, w / 2, h / 2));
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.lineTo(x + w - r, y);
+  g.arcTo(x + w, y, x + w, y + r, r);
+  g.lineTo(x + w, y + h - r);
+  g.arcTo(x + w, y + h, x + w - r, y + h, r);
+  g.lineTo(x + r, y + h);
+  g.arcTo(x, y + h, x, y + h - r, r);
+  g.lineTo(x, y + r);
+  g.arcTo(x, y, x + r, y, r);
+  g.closePath();
+}
+
+function strokeLine(g, x0, y0, x1, y1) {
+  g.beginPath();
+  g.moveTo(x0, y0);
+  g.lineTo(x1, y1);
+  g.stroke();
+}
+
+function linear(g, x0, y0, c0, x1, y1, c1) {
+  const gradient = g.createLinearGradient(x0, y0, x1, y1);
+  gradient.addColorStop(0, c0);
+  gradient.addColorStop(1, c1);
+  return gradient;
+}
+
+function radial(g, cx, cy, r, stops) {
+  const gradient = g.createRadialGradient(cx, cy, 0, cx, cy, Math.max(0.001, r));
+  for (const [fraction, color] of stops) gradient.addColorStop(fraction, color);
+  return gradient;
+}
+
+function setStroke(g, width, round, dash, dashOffset) {
+  g.lineWidth = width;
+  g.lineCap = round ? 'round' : 'butt';
+  g.lineJoin = 'round';
+  g.setLineDash(dash || []);
+  g.lineDashOffset = dashOffset || 0;
+}
+
+function textWidth(g, text) {
+  return g.measureText(text).width;
+}
+
+function drawRight(g, text, right, baseline) {
+  g.fillText(text, right - textWidth(g, text), baseline);
+}
+
+/** Baseline that centers the current font vertically in a box. */
+function baselineIn(g, top, height) {
+  const m = g.measureText('Hg');
+  const ascent = m.fontBoundingBoxAscent !== undefined ? m.fontBoundingBoxAscent : m.actualBoundingBoxAscent;
+  const descent = m.fontBoundingBoxDescent !== undefined ? m.fontBoundingBoxDescent : m.actualBoundingBoxDescent;
+  return top + (height - (ascent + descent)) / 2 + ascent;
+}
+
+/** Logo: a traffic light on the same violet-to-teal tile as the pendulum. */
+function paintLogo(g, x, y, size) {
+  roundRectPath(g, x, y, size, size, size * 0.32);
+  g.fillStyle = linear(g, x, y, rgba(T.VIOLET), x + size, y + size, rgba(T.TEAL));
+  g.fill();
+  const w = size * 0.34;
+  const h = size * 0.7;
+  const left = x + (size - w) / 2;
+  const top = y + (size - h) / 2;
+  roundRectPath(g, left, top, w, h, w * 0.7);
+  g.fillStyle = 'rgba(255,255,255,0.94)';
+  g.fill();
+  const r = w * 0.27;
+  const colors = ['rgba(15,23,42,0.28)', 'rgba(15,23,42,0.28)', 'rgba(22,163,74,1)'];
+  for (let k = 0; k < 3; k++) fillCircle(g, x + size / 2, top + h * (0.2 + 0.3 * k), r, colors[k]);
+}
+
+/** Prepares a small canvas for crisp drawing at the screen's pixel density. */
+function hiDpi(canvas, width, height) {
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const g = canvas.getContext('2d');
+  g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  g.clearRect(0, 0, width, height);
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Traffic model: one intersection, four approaches, one lane each way
+// ---------------------------------------------------------------------------
+
+const TIME_STEP = 0.1;           // s
+const LANE_W = 3.5;              // m
+const ROAD_HALF = LANE_W;        // half the road width (one lane each way)
+const STOP_FROM_CENTER = 7.5;    // m, stop line distance from the center of the box
+const APPROACH = 150;            // m from the spawn point to the stop line
+const STOP_S = APPROACH;         // position of the stop line along a lane
+const EXIT_S = APPROACH + 2 * STOP_FROM_CENTER + 120;
+const CAR_LENGTH = 4.5;          // m
+const FREE_SPEED = 13.9;         // m/s (50 km/h)
+const DETECTOR = 100;            // m before the stop line the controller "sees"
+
+// Intelligent Driver Model
+const IDM_ACCEL = 1.5;           // m/s²
+const IDM_BRAKE = 2.0;           // m/s², comfortable
+const IDM_HEADWAY = 1.2;         // s
+const IDM_JAM_GAP = 2.0;         // m
+const YELLOW_BRAKE = 3.5;        // m/s², the most a driver brakes for a yellow light
+
+const YELLOW_TIME = 3;           // s
+const ALL_RED_TIME = 2;          // s
+const MIN_GREEN = 5;             // s
+const MAX_GREEN = 90;            // s
+const DECISION_PERIOD = 1;       // s, the controller decides once per second while green
+const WAITING_SPEED = 1.5;       // m/s, slower than this counts as waiting
+const IDEAL_TIME = STOP_S / FREE_SPEED; // s to reach the stop line with no one in the way
+
+/**
+ * Efficiency of the trip to the intersection: the ideal time divided by the real time
+ * (ideal + wait). 100% = nobody ever stops; it rises as the lights learn to waste less time.
+ */
+function efficiency(delay) {
+  return IDEAL_TIME / (IDEAL_TIME + delay);
+}
+
+const GREEN = 'GREEN';
+const YELLOW = 'YELLOW';
+const ALL_RED = 'ALL_RED';
+const NS = 0;
+const EW = 1;
+// Approaches: where the cars come from. Phase NS serves N and S, phase EW serves W and E.
+const APPROACHES = [
+  { id: 'N', phase: NS }, { id: 'S', phase: NS }, { id: 'W', phase: EW }, { id: 'E', phase: EW },
+];
+
+const LEARN = 'LEARN';
+const EXPERT = 'EXPERT';
+const FIXED = 'FIXED';
+const MODES = [LEARN, EXPERT, FIXED];
+
+function gaussian() {
+  let u = 0;
+  while (u === 0) u = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+/** Standard normal cumulative distribution (Abramowitz-Stegun 7.1.26). */
+function normalCdf(z) {
+  const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+      + 0.254829592) * t * Math.exp(-z * z / 2);
+  return z >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+}
+
+/**
+ * Fuzzy partition and rule base (zero-order Takagi-Sugeno), seen from the phase that is green:
+ * cars on the green approaches, cars on the red approaches (5 sets each) and how long the
+ * green has lasted (3 sets): 5 x 5 x 3 = 75 rules "IF ... THEN switch urgency = w".
+ * Urgency > 0 means "switch to the other phase", < 0 means "keep the green".
+ */
+const FuzzyRules = (() => {
+  const QUEUE_CENTERS = [0, 3, 7, 12, 20];   // cars
+  const GREEN_CENTERS = [5, 20, 45];        // s of green
+  const CENTERS = [QUEUE_CENTERS, QUEUE_CENTERS, GREEN_CENTERS];
+  const RULES = 5 * 5 * 3;
+  const MAX_URGENCY = 8;
+  const EXPERT_WEIGHTS = new Float64Array(RULES);
+  const mu = CENTERS.map(c => new Float64Array(c.length));
+
+  function clampUrgency(value) {
+    return Math.max(-MAX_URGENCY, Math.min(MAX_URGENCY, value));
+  }
+
+  // Expert rule base from traffic engineering: serve the bigger queue, but never cut a green
+  // that still has cars flowing, and lean toward switching as the green gets long.
+  let r = 0;
+  for (let a = 0; a < 5; a++) {
+    for (let b = 0; b < 5; b++) {
+      for (let c = 0; c < 3; c++) {
+        const green = QUEUE_CENTERS[a];
+        const red = QUEUE_CENTERS[b];
+        const elapsed = GREEN_CENTERS[c];
+        EXPERT_WEIGHTS[r++] = clampUrgency(0.5 * red - 0.8 * green - 0.8 + 0.04 * (elapsed - 5));
+      }
+    }
+  }
+
+  /** Triangular memberships (centers may be unevenly spaced); they always add up to 1. */
+  function memberships(u, centers, out) {
+    const n = centers.length;
+    out.fill(0);
+    if (u <= centers[0]) { out[0] = 1; return; }
+    if (u >= centers[n - 1]) { out[n - 1] = 1; return; }
+    for (let k = 0; k < n - 1; k++) {
+      if (u <= centers[k + 1]) {
+        const t = (u - centers[k]) / (centers[k + 1] - centers[k]);
+        out[k] = 1 - t;
+        out[k + 1] = t;
+        return;
+      }
+    }
+  }
+
+  /** How strongly each rule fires for the state [green cars, red cars, green time] (product AND). */
+  function firing(state, phi) {
+    for (let i = 0; i < 3; i++) memberships(state[i], CENTERS[i], mu[i]);
+    let k = 0;
+    for (let a = 0; a < 5; a++) {
+      for (let b = 0; b < 5; b++) {
+        const ab = mu[0][a] * mu[1][b];
+        for (let c = 0; c < 3; c++) phi[k++] = ab * mu[2][c];
+      }
+    }
+  }
+
+  function dot(a, b) {
+    let sum = 0;
+    for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+    return sum;
+  }
+
+  function infer(weights, state, phi) {
+    firing(state, phi);
+    return dot(weights, phi);
+  }
+
+  return { QUEUE_CENTERS, GREEN_CENTERS, RULES, MAX_URGENCY, EXPERT_WEIGHTS, clampUrgency, firing, dot, infer };
+})();
+
+/**
+ * Fuzzy actor-critic for a yes/no decision. Each second of green it decides "switch or keep"
+ * by adding noise to the rules' urgency; it only feels the cost of cars waiting.
+ * Decisions are spaced unevenly (a switch takes yellow + all red + minimum green), so the
+ * discount follows the elapsed time (semi-Markov TD learning).
+ */
+class FuzzyActorCritic {
+  static GAMMA = 0.97;       // per second: it cares about the next half minute or so
+  static LAMBDA = 0.8;
+  static ACTOR_RATE = 0.6;
+  static CRITIC_RATE = 0.15;
+
+  constructor() {
+    const n = FuzzyRules.RULES;
+    this.w = new Float64Array(n);   // actor: switch urgency of each rule
+    this.v = new Float64Array(n);   // critic: value of each rule
+    this.actorTrace = new Float64Array(n);
+    this.criticTrace = new Float64Array(n);
+    this.phi = new Float64Array(n);
+    this.previousPhi = new Float64Array(n);
+    this.hasPrevious = false;
+    this.previousScore = 0;
+    this.lastProbability = 0;
+  }
+
+  /**
+   * Learns from the previous decision (reward collected since then, already discounted, over
+   * 'elapsed' seconds), then decides. Returns true to switch.
+   */
+  decide(state, reward, elapsed, rateMultiplier, noise, forced) {
+    FuzzyRules.firing(state, this.phi);
+    if (this.hasPrevious) {
+      const discount = Math.pow(FuzzyActorCritic.GAMMA, elapsed);
+      const tdError = reward + discount * FuzzyRules.dot(this.v, this.phi)
+          - FuzzyRules.dot(this.v, this.previousPhi);
+      this.learn(tdError, Math.pow(FuzzyActorCritic.LAMBDA, Math.min(elapsed, 10)) * discount, rateMultiplier);
+    }
+    const urgency = FuzzyRules.dot(this.w, this.phi);
+    let probability;
+    let choice;
+    if (noise > 0) {
+      probability = normalCdf(urgency / noise);
+      choice = urgency + noise * gaussian() > 0;
+    } else {
+      choice = urgency > 0;
+      probability = choice ? 1 : 0;
+    }
+    if (forced !== undefined) choice = forced;
+    this.lastProbability = probability;
+    this.previousScore = (choice ? 1 : 0) - probability;
+    this.previousPhi.set(this.phi);
+    this.hasPrevious = true;
+    return choice;
+  }
+
+  learn(tdError, decay, rateMultiplier) {
+    const actorRate = FuzzyActorCritic.ACTOR_RATE * rateMultiplier;
+    const criticRate = FuzzyActorCritic.CRITIC_RATE * rateMultiplier;
+    const { w, v, actorTrace, criticTrace, previousPhi, previousScore } = this;
+    for (let i = 0; i < w.length; i++) {
+      criticTrace[i] = decay * criticTrace[i] + previousPhi[i];
+      actorTrace[i] = decay * actorTrace[i] + previousScore * previousPhi[i];
+      v[i] += criticRate * tdError * criticTrace[i];
+      w[i] = FuzzyRules.clampUrgency(w[i] + actorRate * tdError * actorTrace[i]);
+    }
+  }
+
+  reset() {
+    this.w.fill(0);
+    this.v.fill(0);
+    this.restart();
+  }
+
+  restart() {
+    this.actorTrace.fill(0);
+    this.criticTrace.fill(0);
+    this.hasPrevious = false;
+  }
+}
+
+/** A car on one approach lane; s is the position of its front bumper along the lane. */
+class Car {
+  constructor(arrival, s, v, color) {
+    this.arrival = arrival;   // when it showed up (it may wait off screen before entering)
+    this.s = s;
+    this.v = v;
+    this.a = 0;
+    this.color = color;
+    this.committed = false;   // decided to go through a yellow light
+    this.crossed = false;
+  }
+}
+
+/** One intersection with its four lanes, its lights and a controller. */
+class Intersection {
+  constructor() {
+    this.lanes = APPROACHES.map(() => ({ cars: [], backlog: [] })); // backlog: arrived, no room yet
+    this.restart();
+  }
+
+  restart() {
+    for (const lane of this.lanes) {
+      lane.cars.length = 0;
+      lane.backlog.length = 0;
+    }
+    this.time = 0;
+    this.phase = NS;
+    this.stage = GREEN;
+    this.stageTime = 0;
+    this.decisionClock = 0;
+    this.switches = 0;
+    this.crossedCount = 0;
+    this.delaySum = 0;           // of the cars that crossed, current chart period
+    this.delayCount = 0;
+    this.totalDelay = 0;
+    this.totalCrossed = 0;
+    this.waitingNow = 0;
+  }
+
+  light(approach) {
+    if (APPROACHES[approach].phase !== this.phase) return 'R';
+    if (this.stage === GREEN) return 'G';
+    return this.stage === YELLOW ? 'Y' : 'R';
+  }
+
+  arrive(approach, color) {
+    this.lanes[approach].backlog.push({ arrival: this.time, color });
+  }
+
+  /** Starts the yellow light of the current phase (if it is green). */
+  requestSwitch() {
+    if (this.stage !== GREEN) return false;
+    this.stage = YELLOW;
+    this.stageTime = 0;
+    this.switches++;
+    return true;
+  }
+
+  canDecide() {
+    return this.stage === GREEN && this.stageTime >= MIN_GREEN;
+  }
+
+  /** Cars the controller sees: [on the green approaches, on the red approaches]. */
+  queues() {
+    const counts = [0, 0];
+    this.lanes.forEach((lane, i) => {
+      let n = lane.backlog.length;
+      for (const car of lane.cars) {
+        if (!car.crossed && car.s > STOP_S - DETECTOR) n++;
+      }
+      counts[APPROACHES[i].phase] += n;
+    });
+    return this.phase === NS ? counts : [counts[1], counts[0]];
+  }
+
+  /** Cars waiting per phase (for the HUD). */
+  waitingByPhase() {
+    const counts = [0, 0];
+    this.lanes.forEach((lane, i) => {
+      let n = lane.backlog.length;
+      for (const car of lane.cars) if (!car.crossed && car.v < WAITING_SPEED) n++;
+      counts[APPROACHES[i].phase] += n;
+    });
+    return counts;
+  }
+
+  step(dt) {
+    this.time += dt;
+    this.stageTime += dt;
+    if (this.stage === YELLOW && this.stageTime >= YELLOW_TIME) {
+      this.stage = ALL_RED;
+      this.stageTime = 0;
+    } else if (this.stage === ALL_RED && this.stageTime >= ALL_RED_TIME) {
+      this.stage = GREEN;
+      this.stageTime = 0;
+      this.phase = 1 - this.phase;
+      this.decisionClock = 0;
+    }
+    let waiting = 0;
+    this.lanes.forEach((lane, i) => { waiting += this.stepLane(lane, this.light(i), dt); });
+    this.waitingNow = waiting;
+    return waiting;
+  }
+
+  stepLane(lane, light, dt) {
+    const cars = lane.cars;
+    // Cars that arrived enter when there is room at the start of the lane.
+    if (lane.backlog.length > 0) {
+      const last = cars[cars.length - 1];
+      if (!last || last.s - CAR_LENGTH > IDM_JAM_GAP + 1) {
+        const entry = lane.backlog.shift();
+        const speed = last ? Math.min(FREE_SPEED, last.v) : FREE_SPEED;
+        cars.push(new Car(entry.arrival, 0, speed, entry.color));
+      }
+    }
+    let waiting = lane.backlog.length;
+    const sqrtAB = 2 * Math.sqrt(IDM_ACCEL * IDM_BRAKE);
+    for (let k = 0; k < cars.length; k++) {
+      const car = cars[k];
+      let gap = Infinity;
+      let leaderSpeed = 0;
+      if (k > 0) {
+        const leader = cars[k - 1];
+        gap = leader.s - CAR_LENGTH - car.s;
+        leaderSpeed = leader.v;
+      }
+      if (!car.crossed && !car.committed && light !== 'G') {
+        const toLine = STOP_S - car.s;
+        // Yellow: stop if it can do so comfortably, otherwise go through.
+        if (light === 'Y' && toLine < car.v * car.v / (2 * YELLOW_BRAKE)) {
+          car.committed = true;
+        } else if (toLine + IDM_JAM_GAP - 0.5 < gap) {
+          gap = toLine + IDM_JAM_GAP - 0.5;
+          leaderSpeed = 0;
+        }
+      }
+      const desired = IDM_JAM_GAP + Math.max(0, car.v * IDM_HEADWAY + car.v * (car.v - leaderSpeed) / sqrtAB);
+      const ratio = car.v / FREE_SPEED;
+      let accel = IDM_ACCEL * (1 - ratio * ratio * ratio * ratio);
+      if (gap < Infinity) accel -= IDM_ACCEL * (desired / Math.max(0.1, gap)) ** 2;
+      accel = Math.max(-9, accel);
+      const v = Math.max(0, car.v + accel * dt);
+      car.s += (car.v + v) / 2 * dt;
+      car.a = accel;
+      car.v = v;
+      if (!car.crossed) {
+        if (car.s >= STOP_S) {
+          car.crossed = true;
+          const delay = Math.max(0, this.time - car.arrival - STOP_S / FREE_SPEED);
+          this.delaySum += delay;
+          this.delayCount++;
+          this.totalDelay += delay;
+          this.totalCrossed++;
+          this.crossedCount++;
+        } else if (car.v < WAITING_SPEED) {
+          waiting++;
+        }
+      }
+    }
+    while (cars.length > 0 && cars[0].s > EXIT_S) cars.shift();
+    return waiting;
+  }
+}
+
+/**
+ * The whole simulation: the controlled intersection plus a "shadow" intersection run by a
+ * fixed-time plan with exactly the same cars, so the chart always has a fair reference.
+ */
+class TrafficModel {
+  static PERIOD = 120;          // s of simulated time per chart bar
+  static RUSH_PERIOD = 1800;    // s, the traffic swings between the two roads every half hour
+  static REWARD_SCALE = 10;     // cars waiting per unit of penalty
+  static LOG_CAPACITY = 400;
+  static COLORS = 6;
+
+  constructor() {
+    this.main = new Intersection();
+    this.baseline = new Intersection();
+    this.learner = new FuzzyActorCritic();
+    this.log = [];
+    this.mode = LEARN;
+    this.flow = [12, 6];        // cars per minute per approach: [north-south, east-west]
+    this.variation = 0.5;
+    this.fixedGreen = 30;
+    this.learningRate = 1;
+    this.exploration = 1;
+    this.restart();
+  }
+
+  restart() {
+    this.main.restart();
+    this.baseline.restart();
+    this.learner.restart();
+    this.time = 0;
+    this.periodTime = 0;
+    this.resetReward();
+    this.lastDecision = null;   // { switch, urgency, probability } for the HUD
+  }
+
+  restartAndClearChart() {
+    this.restart();
+    this.log.length = 0;
+  }
+
+  forget() {
+    this.learner.reset();
+    this.restartAndClearChart();
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    this.learner.restart();
+    this.resetReward();
+  }
+
+  resetReward() {
+    this.reward = 0;
+    this.rewardDiscount = 1;
+    this.rewardTime = 0;
+  }
+
+  /** Arrival rate (cars/s) of an approach at the current time. */
+  rate(approach) {
+    const phase = APPROACHES[approach].phase;
+    const swing = Math.sin(2 * Math.PI * this.time / TrafficModel.RUSH_PERIOD) * this.variation;
+    return this.flow[phase] / 60 * Math.max(0, phase === NS ? 1 + swing : 1 - swing);
+  }
+
+  /** A burst of cars on one road (the "push" of this simulator). */
+  burst(phase, count) {
+    for (let i = 0; i < APPROACHES.length; i++) {
+      if (APPROACHES[i].phase !== phase) continue;
+      for (let k = 0; k < count; k++) this.arriveBoth(i);
+    }
+  }
+
+  arriveBoth(approach) {
+    const color = Math.floor(Math.random() * TrafficModel.COLORS);
+    this.main.arrive(approach, color);
+    this.baseline.arrive(approach, color);
+  }
+
+  /** The user clicked the lights: switch now (counts as the learner's decision). */
+  manualSwitch() {
+    const main = this.main;
+    if (main.stage !== GREEN || main.stageTime < 2) return false;
+    if (this.mode === LEARN) this.decideLearner(true);
+    return main.requestSwitch();
+  }
+
+  step(dt) {
+    this.time += dt;
+    for (let i = 0; i < APPROACHES.length; i++) {
+      if (Math.random() < this.rate(i) * dt) this.arriveBoth(i);
+    }
+    const waiting = this.main.step(dt);
+    this.baseline.step(dt);
+    this.runFixed(this.baseline);
+
+    const gamma = FuzzyActorCritic.GAMMA;
+    this.reward += this.rewardDiscount * (-waiting / TrafficModel.REWARD_SCALE) * dt;
+    this.rewardDiscount *= Math.pow(gamma, dt);
+    this.rewardTime += dt;
+
+    const main = this.main;
+    if (this.mode === FIXED) {
+      this.runFixed(main);
+    } else if (main.stage === GREEN) {
+      main.decisionClock += dt;
+      if (main.stageTime >= MAX_GREEN) {
+        if (this.mode === LEARN) this.decideLearner(true);
+        main.requestSwitch();
+      } else if (main.canDecide() && main.decisionClock >= DECISION_PERIOD) {
+        main.decisionClock = 0;
+        const choice = this.mode === LEARN ? this.decideLearner() : this.decideExpert();
+        if (choice) main.requestSwitch();
+      }
+    }
+
+    this.periodTime += dt;
+    if (this.periodTime >= TrafficModel.PERIOD) this.closePeriod();
+  }
+
+  runFixed(intersection) {
+    if (intersection.stage === GREEN && intersection.stageTime >= this.fixedGreen) intersection.requestSwitch();
+  }
+
+  state() {
+    const [green, red] = this.main.queues();
+    return [green, red, this.main.stageTime];
+  }
+
+  decideLearner(forced) {
+    const state = this.state();
+    const choice = this.learner.decide(state, this.reward, this.rewardTime, this.learningRate,
+        this.exploration, forced);
+    this.lastDecision = {
+      switch: choice, urgency: FuzzyRules.dot(this.learner.w, this.learner.phi),
+      probability: this.learner.lastProbability,
+    };
+    this.resetReward();
+    return choice;
+  }
+
+  decideExpert() {
+    const urgency = FuzzyRules.infer(FuzzyRules.EXPERT_WEIGHTS, this.state(), this.learner.phi);
+    this.lastDecision = { switch: urgency > 0, urgency, probability: urgency > 0 ? 1 : 0 };
+    return urgency > 0;
+  }
+
+  closePeriod() {
+    const average = it => (it.delayCount > 0 ? it.delaySum / it.delayCount : 0);
+    this.log.push({
+      delay: average(this.main), baseline: average(this.baseline), mode: this.mode,
+      crossed: this.main.delayCount, baselineCrossed: this.baseline.delayCount,
+    });
+    if (this.log.length > TrafficModel.LOG_CAPACITY) this.log.shift();
+    for (const it of [this.main, this.baseline]) {
+      it.delaySum = 0;
+      it.delayCount = 0;
+    }
+    this.periodTime = 0;
+  }
+
+  ruleUrgencies() {
+    return this.mode === LEARN ? this.learner.w : FuzzyRules.EXPERT_WEIGHTS;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Application state and simulation loop
+// ---------------------------------------------------------------------------
+
+const model = new TrafficModel();
+let running = false;
+let speed = 1;
+let stepCount = 0;
+let simTimer = null;
+let lastTick = 0;
+let accumulator = 0;
+
+/**
+ * Fixed time step integration that follows the wall clock, multiplied by the chosen speed
+ * (at 20x, one real second simulates twenty). Runs on its own timer, apart from drawing.
+ */
+function simulationTick() {
+  if (!running) return;
+  const now = performance.now();
+  accumulator += Math.min((now - lastTick) / 1000, MAX_CATCH_UP) * speed;
+  lastTick = now;
+  while (accumulator >= TIME_STEP) {
+    model.step(TIME_STEP);
+    accumulator -= TIME_STEP;
+    stepCount++;
+  }
+  simTimer = setTimeout(simulationTick, SIMULATION_TICK_MS);
+}
+
+function startSimulation() {
+  if (running) return;
+  running = true;
+  lastTick = performance.now();
+  accumulator = 0;
+  simTimer = setTimeout(simulationTick, SIMULATION_TICK_MS);
+}
+
+function stopSimulation() {
+  running = false;
+  clearTimeout(simTimer);
+  simTimer = null;
+}
+
+function toggleSimulation() {
+  if (running) stopSimulation(); else startSimulation();
+}
+
+/** Bursts and manual switches only make sense while time runs. */
+function canInteract() {
+  return running;
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar components
+// ---------------------------------------------------------------------------
+
+/** Labeled slider showing its formatted value: the single input component of the sidebar. */
+class ValueSlider {
+  constructor(name, min, max, step, defaultValue, format, accent, dotEvery, majorEvery) {
+    this.step = step;
+    this.min = Math.round(min / step);
+    this.max = Math.round(max / step);
+    this.steps = Math.round(defaultValue / step);
+    this.defaultValue = defaultValue;
+    this.format = format;
+    this.accent = accent;
+    this.dotEvery = dotEvery;
+    this.majorEvery = majorEvery;
+    this.listeners = [];
+
+    this.element = document.createElement('div');
+    this.element.className = 'slider';
+    this.element.innerHTML = '<div class="top"><span class="name"></span><span class="value"></span></div><canvas></canvas>';
+    this.element.querySelector('.name').textContent = name;
+    this.valueLabel = this.element.querySelector('.value');
+    this.canvas = this.element.querySelector('canvas');
+    this.canvas.setAttribute('role', 'slider');
+    this.canvas.setAttribute('aria-label', name);
+
+    const fromPointer = e => {
+      const rect = this.canvas.getBoundingClientRect();
+      const { left, right } = this.trackBounds(rect.width);
+      const t = (e.clientX - rect.left - left) / Math.max(1, right - left);
+      this.setSteps(Math.round(this.min + t * (this.max - this.min)));
+    };
+    this.canvas.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      try {
+        this.canvas.setPointerCapture(e.pointerId);
+      } catch (err) {
+        // Capture is only a convenience; the slider still works without it.
+      }
+      this.dragging = true;
+      fromPointer(e);
+      e.preventDefault();
+    });
+    this.canvas.addEventListener('pointermove', e => {
+      if (this.dragging) fromPointer(e);
+    });
+    const end = () => { this.dragging = false; };
+    this.canvas.addEventListener('pointerup', end);
+    this.canvas.addEventListener('pointercancel', end);
+    // The mouse wheel is left alone, so scrolling the page never changes a value.
+    // Double-click restores the default value.
+    this.canvas.addEventListener('dblclick', () => this.setValue(this.defaultValue));
+    this.update();
+  }
+
+  trackBounds(width) {
+    return { left: 11, right: width - 11 };
+  }
+
+  getValue() {
+    return this.steps * this.step;
+  }
+
+  setValue(value) {
+    this.setSteps(Math.round(value / this.step));
+  }
+
+  setSteps(steps) {
+    const clamped = Math.max(this.min, Math.min(this.max, steps));
+    if (clamped === this.steps) return;
+    this.steps = clamped;
+    this.update();
+    for (const listener of this.listeners) listener();
+  }
+
+  onChange(action) {
+    this.listeners.push(action);
+  }
+
+  update() {
+    this.valueLabel.textContent = this.format(this.getValue());
+    this.valueLabel.style.color = rgba(this.accent());
+    this.canvas.setAttribute('aria-valuetext', this.valueLabel.textContent);
+    this.paint();
+  }
+
+  paint() {
+    const width = this.canvas.clientWidth;
+    if (width <= 0) return;
+    const height = 23;
+    const g = hiDpi(this.canvas, width, height);
+    const accent = this.accent();
+    const cy = 11;
+    const { left, right } = this.trackBounds(width);
+    const xFor = v => left + (v - this.min) / Math.max(1, this.max - this.min) * (right - left);
+
+    roundRectPath(g, left, cy - 3, right - left, 6, 6);
+    g.fillStyle = rgba(T.FIELD);
+    g.fill();
+
+    const origin = Math.max(this.min, Math.min(this.max, 0));
+    const originX = xFor(origin);
+    const thumbX = xFor(this.steps);
+    if (Math.abs(thumbX - originX) > 1) {
+      roundRectPath(g, Math.min(originX, thumbX), cy - 3, Math.abs(thumbX - originX), 6, 6);
+      g.fillStyle = linear(g, originX, 0, rgba(accent, 80), thumbX, 0, rgba(accent));
+      g.fill();
+    }
+
+    const low = Math.min(origin, this.steps);
+    const high = Math.max(origin, this.steps);
+    for (let v = this.min; v <= this.max; v++) {
+      if (v % this.dotEvery !== 0) continue;
+      const filled = v >= low && v <= high;
+      fillCircle(g, xFor(v), cy + 9, v % this.majorEvery === 0 ? 1.8 : 1.0,
+          filled ? rgba(accent, 150) : rgba(T.MUTED, 90));
+    }
+
+    fillCircle(g, thumbX, cy, 10, rgba(accent, 50));
+    fillCircle(g, thumbX, cy, 7, '#F8FAFC');
+    setStroke(g, 2.5, false);
+    g.strokeStyle = rgba(accent);
+    circlePath(g, thumbX, cy, 7);
+    g.stroke();
+  }
+}
+
+/** Sidebar button with a glyph (outlined, like the pendulum's secondary buttons). */
+class ModernButton {
+  constructor(element, text, accent) {
+    this.element = element;
+    this.accent = accent;
+    element.innerHTML = '<canvas aria-hidden="true"></canvas><span></span>';
+    element.querySelector('span').textContent = text;
+    this.icon = element.querySelector('canvas');
+    // Buttons never take the keyboard focus (Space stays a shortcut).
+    element.addEventListener('mousedown', e => e.preventDefault());
+  }
+
+  paint() {
+    const accent = this.accent();
+    const s = this.element.style;
+    s.setProperty('--bg', rgba(accent, 22));
+    s.setProperty('--bg-hover', rgba(accent, 45));
+    s.setProperty('--bg-pressed', rgba(accent, 70));
+    s.setProperty('--border', rgba(accent, 150));
+    s.setProperty('--border-hover', rgba(accent, 230));
+    const foreground = T.dark ? mix(accent, WHITE, 0.3) : mix(accent, BLACK, 0.15);
+    s.setProperty('--fg', rgba(foreground));
+    const size = 15;
+    const g = hiDpi(this.icon, size, size);
+    paintResetGlyph(g, size / 2, size / 2, size / 2 - 1, rgba(foreground));
+  }
+}
+
+/** Circular arrow ("start over"). */
+function paintResetGlyph(g, cx, cy, r, color) {
+  setStroke(g, 2, true);
+  g.strokeStyle = color;
+  g.beginPath();
+  g.arc(cx, cy, r, toRadians(-60), toRadians(-350), true);
+  g.stroke();
+  const a = toRadians(350);
+  const ex = cx + r * Math.cos(a);
+  const ey = cy - r * Math.sin(a);
+  const dx = -Math.sin(a);
+  const dy = -Math.cos(a);
+  g.beginPath();
+  g.moveTo(ex + dx * 4, ey + dy * 4);
+  g.lineTo(ex - dy * 3.5, ey + dx * 3.5);
+  g.lineTo(ex + dy * 3.5, ey - dx * 3.5);
+  g.closePath();
+  g.fillStyle = color;
+  g.fill();
+}
+
+// Every input of the sidebar is the same component: a labeled slider (no typing).
+const speedInput = new ValueSlider(L.speed, 1, 100, 1, 1,
+    v => num(v, 0) + '×', () => T.CYAN, 5, 25);
+const learningRateInput = new ValueSlider(L.learningRate, 0.1, 3, 0.1, 1,
+    v => num(v, 1) + '×', () => T.VIOLET, 5, 10);
+const explorationInput = new ValueSlider(L.exploration, 0, 3, 0.1, 1,
+    v => num(v, 1), () => T.VIOLET, 5, 10);
+const fixedGreenInput = new ValueSlider(L.fixedGreen, 10, 60, 1, 30,
+    v => num(v, 0) + ' s', () => T.AMBER, 5, 10);
+const flowNSInput = new ValueSlider(L.flowNS, 0, 20, 1, 9,
+    v => num(v, 0) + L.perMinute, () => T.TEAL, 1, 5);
+const flowEWInput = new ValueSlider(L.flowEW, 0, 20, 1, 5,
+    v => num(v, 0) + L.perMinute, () => T.TEAL, 1, 5);
+const variationInput = new ValueSlider(L.variation, 0, 100, 5, 50,
+    v => '±' + num(v, 0) + '%', () => T.TEAL, 2, 10);
+const burstInput = new ValueSlider(L.burstSize, 1, 15, 1, 6,
+    v => L.cars(v), () => T.AMBER, 1, 5);
+const learningInputs = [speedInput, learningRateInput, explorationInput];
+const environmentInputs = [flowNSInput, flowEWInput, variationInput, burstInput];
+const allSliders = [fixedGreenInput, ...learningInputs, ...environmentInputs];
+
+const btForget = new ModernButton(document.getElementById('btForget'), L.forget, () => T.ROSE);
+const allButtons = [btForget];
+
+const modeButtons = Array.from(document.querySelectorAll('#modeControl button'));
+const modeAccents = [() => T.CYAN, () => T.VIOLET, () => T.AMBER];
+let selectedMode = 0;
+
+function buildSidebar() {
+  fixedGreenInput.element.classList.add('first');
+  document.getElementById('controllerSlot').appendChild(fixedGreenInput.element);
+  for (const input of learningInputs) document.getElementById('learningSlot').appendChild(input.element);
+  for (const input of environmentInputs) document.getElementById('environmentSlot').appendChild(input.element);
+
+  // Every setting takes effect immediately, running or paused.
+  speedInput.onChange(() => { speed = speedInput.getValue(); });
+  learningRateInput.onChange(() => { model.learningRate = learningRateInput.getValue(); });
+  explorationInput.onChange(() => { model.exploration = explorationInput.getValue(); });
+  fixedGreenInput.onChange(() => { model.fixedGreen = fixedGreenInput.getValue(); });
+  flowNSInput.onChange(() => { model.flow[NS] = flowNSInput.getValue(); });
+  flowEWInput.onChange(() => { model.flow[EW] = flowEWInput.getValue(); });
+  variationInput.onChange(() => { model.variation = variationInput.getValue() / 100; });
+
+  for (const button of modeButtons) {
+    button.addEventListener('mousedown', e => e.preventDefault());
+    button.addEventListener('click', () => selectMode(Number(button.dataset.index)));
+  }
+  btForget.element.addEventListener('click', () => model.forget());
+
+  const themeButton = document.getElementById('themeToggle');
+  themeButton.addEventListener('mousedown', e => e.preventDefault());
+  themeButton.addEventListener('click', toggleTheme);
+  themeButton.addEventListener('mouseenter', () => { hoverThemeToggle = true; paintThemeToggle(); });
+  themeButton.addEventListener('mouseleave', () => { hoverThemeToggle = false; paintThemeToggle(); });
+}
+
+function selectMode(index) {
+  if (index < 0 || index >= MODES.length || index === selectedMode) return;
+  selectedMode = index;
+  model.setMode(MODES[index]);
+  updateModeControls();
+}
+
+function updateModeControls() {
+  modeButtons.forEach((button, i) => {
+    button.classList.toggle('selected', i === selectedMode);
+    button.style.setProperty('--seg-accent', rgba(modeAccents[i]()));
+    button.style.setProperty('--seg-hover', rgba(modeAccents[i](), 40));
+    button.style.setProperty('--seg-text', T.dark ? '#041318' : '#FFFFFF');
+  });
+  const descriptions = { [LEARN]: L.learnDescription, [EXPERT]: L.expertDescription, [FIXED]: L.fixedDescription };
+  document.getElementById('modeDescription').textContent = descriptions[model.mode];
+}
+
+let hoverThemeToggle = false;
+
+/** Shows the sun in the dark theme and the moon in the light theme (the theme it switches to). */
+function paintThemeToggle() {
+  const size = ui(24);
+  const g = hiDpi(document.getElementById('themeIcon'), size, size);
+  roundRectPath(g, 0.5, 0.5, size - 1, size - 1, 10);
+  g.fillStyle = hoverThemeToggle ? rgba(T.CYAN, 40) : rgba(T.FIELD);
+  g.fill();
+  setStroke(g, 1, false);
+  g.strokeStyle = hoverThemeToggle ? rgba(T.CYAN) : rgba(T.PANEL_BORDER);
+  g.stroke();
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size * 0.18;
+  if (T.dark) {
+    fillCircle(g, cx, cy, r, rgba(T.AMBER));
+    setStroke(g, 1.8, true);
+    g.strokeStyle = rgba(T.AMBER);
+    for (let k = 0; k < 8; k++) {
+      const a = k * Math.PI / 4;
+      strokeLine(g, cx + Math.cos(a) * r * 1.6, cy + Math.sin(a) * r * 1.6,
+          cx + Math.cos(a) * r * 2.3, cy + Math.sin(a) * r * 2.3);
+    }
+  } else {
+    g.save();
+    g.beginPath();
+    g.rect(0, 0, size, size);
+    g.arc(cx + r * 1.1, cy - r * 0.9, r * 1.7, 0, Math.PI * 2);
+    g.clip('evenodd');
+    fillCircle(g, cx, cy, r * 2, rgba(T.VIOLET));
+    g.restore();
+  }
+  document.getElementById('themeToggle').title = T.dark ? L.toLightTheme : L.toDarkTheme;
+}
+
+function paintLogoCanvas() {
+  const g = hiDpi(document.getElementById('logo'), ui(44), ui(44));
+  paintLogo(g, 0, 0, ui(44));
+
+  const icon = document.createElement('canvas');
+  icon.width = 64;
+  icon.height = 64;
+  paintLogo(icon.getContext('2d'), 2, 2, 60);
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = icon.toDataURL('image/png');
+}
+
+/** Applies a theme to the whole page: canvas palette, CSS colors and sidebar widgets. */
+function applyTheme(dark) {
+  applyPalette(dark);
+  const root = document.documentElement;
+  root.dataset.theme = dark ? 'dark' : 'light';
+  root.style.setProperty('--bg-top', rgba(T.BG_TOP));
+  root.style.setProperty('--panel', rgba(T.PANEL));
+  root.style.setProperty('--panel-border', rgba(T.PANEL_BORDER));
+  root.style.setProperty('--field', rgba(T.FIELD));
+  root.style.setProperty('--text', rgba(T.TEXT));
+  root.style.setProperty('--muted', rgba(T.MUTED));
+  root.style.setProperty('--cyan', rgba(T.CYAN));
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.appendChild(meta);
+  }
+  meta.content = rgba(T.BG_TOP);
+  for (const slider of allSliders) slider.update();
+  for (const button of allButtons) button.paint();
+  updateModeControls();
+  paintThemeToggle();
+  paintLogoCanvas();
+}
+
+/** Switches between the dark and light themes and remembers the choice. */
+function toggleTheme() {
+  applyTheme(!T.dark);
+  saveTheme(T.dark);
+}
+
+/** Sends a burst of cars down one road (only while running). */
+function sendBurst(phase) {
+  if (!canInteract()) return;
+  const count = burstInput.getValue();
+  model.burst(phase, count);
+  showToast(L.toastBurst(count, L.roads[phase]), T.AMBER);
+  pressedBurstButton = phase;
+  pressedBurstMillis = performance.now();
+}
+
+/** Switches the lights by hand (only while running and once the green has started). */
+function switchByHand() {
+  if (!canInteract()) return;
+  const opening = 1 - model.main.phase;
+  if (model.manualSwitch()) showToast(L.toastSwitch(L.roads[opening]), T.CYAN);
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts
+// ---------------------------------------------------------------------------
+
+window.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return; // leave system shortcuts alone
+  switch (e.code) {
+    case 'Space':
+      if (!e.repeat) toggleSimulation(); // ignore auto-repeat while the key is held
+      break;
+    case 'KeyR':
+      if (!e.repeat) model.restartAndClearChart();
+      break;
+    case 'KeyM':
+      selectMode((selectedMode + 1) % MODES.length);
+      break;
+    case 'KeyS':
+      if (!e.repeat) switchByHand();
+      break;
+    case 'ArrowUp':
+    case 'ArrowDown':
+      if (!e.repeat) sendBurst(NS);
+      break;
+    case 'ArrowLeft':
+    case 'ArrowRight':
+      if (!e.repeat) sendBurst(EW);
+      break;
+    case 'KeyE':
+      toggleChartView();
+      break;
+    case 'KeyT':
+      toggleTheme();
+      break;
+    default:
+      return;
+  }
+  e.preventDefault();
+});
+
+// ---------------------------------------------------------------------------
+// Simulation canvas
+// ---------------------------------------------------------------------------
+
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const startMillis = performance.now();
+
+/** Small seeded random generator, so the city looks the same on every run. */
+function seededRandom(seed) {
+  let state = seed;
+  return () => {
+    state = (state + 0x6D2B79F5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const heatmapPhi = new Float64Array(FuzzyRules.RULES);
+
+// Layout in logical pixels (the scene is drawn at 'scale' CSS pixels per logical pixel).
+const view = { W: 1000, H: 800, scale: 1, ratio: 1, narrow: false, cssW: 0, cssH: 0 };
+
+let backdrop = null;
+let backdropKey = '';
+
+let rateSampleMillis = performance.now();
+let rateSampleSteps = 0;
+let stepsPerSecond = 0;
+
+let runButtonBounds = null;
+let hoverRunButton = false;
+let resetButtonBounds = null;
+let hoverResetButton = false;
+let hoverBurstButton = -1;     // NS, EW or -1
+let pressedBurstButton = -1;
+let pressedBurstMillis = 0;
+let hoverCrossing = false;
+let chartView = 'efficiency';  // or 'wait'
+let chartToggleBounds = null;
+let hoverChartToggle = false;
+let toastText = null;
+let toastColor = null;
+let toastStart = -10;
+
+const SCENE_HEIGHT_NARROW = 560;
+
+/**
+ * Fits the scene to the window. Wide screens use the full layout at 1:1; small screens draw
+ * the same scene scaled down, and phones stack the two cards on top of the intersection.
+ */
+function layout() {
+  const stacked = window.matchMedia('(max-width: 999px)').matches;
+  const cssW = stage.clientWidth;
+  let scale;
+  let logicalH;
+  let narrow = false;
+  if (cssW < 600) {
+    narrow = true;
+    scale = Math.max(0.45, Math.min(1, cssW / 650));
+    const cards = HUD_MARGIN + ui(150) + 12 + cardHeight();
+    logicalH = cards + SCENE_HEIGHT_NARROW;
+  } else if (stacked) {
+    // Short screens (a phone lying down) keep a readable scale and let the page scroll.
+    const availH = Math.max(window.innerHeight * 0.92, 360);
+    scale = Math.max(Math.min(1, cssW / 900, availH / 700), Math.min(1, cssW / 900, 0.65));
+    logicalH = Math.max(700, Math.min(800, availH / scale));
+  } else {
+    scale = Math.min(1, cssW / 900, stage.clientHeight / 700);
+    logicalH = stage.clientHeight / scale;
+  }
+  if (stacked) {
+    stage.style.setProperty('--stage-height', Math.round(logicalH * scale) + 'px');
+  }
+  const cssH = stacked ? Math.round(logicalH * scale) : stage.clientHeight;
+  const ratio = window.devicePixelRatio || 1;
+  view.narrow = narrow;
+  view.scale = scale;
+  view.ratio = ratio;
+  view.cssW = cssW;
+  view.cssH = cssH;
+  view.W = cssW / scale;
+  view.H = cssH / scale;
+  const pixelW = Math.max(1, Math.round(cssW * ratio));
+  const pixelH = Math.max(1, Math.round(cssH * ratio));
+  if (canvas.width !== pixelW || canvas.height !== pixelH) {
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+  }
+}
+
+function cardHeight() {
+  return ui(214);
+}
+
+function telemetryRect() {
+  if (view.narrow) return { x: HUD_MARGIN, y: HUD_MARGIN, w: view.W - 2 * HUD_MARGIN, h: ui(150) };
+  return { x: HUD_MARGIN, y: HUD_MARGIN, w: ui(270), h: cardHeight() };
+}
+
+function learningRect() {
+  if (view.narrow) {
+    const telemetry = telemetryRect();
+    return { x: HUD_MARGIN, y: telemetry.y + telemetry.h + 12, w: view.W - 2 * HUD_MARGIN, h: cardHeight() };
+  }
+  const cardW = ui(270);
+  return { x: 2 * HUD_MARGIN + cardW, y: HUD_MARGIN, w: view.W - 3 * HUD_MARGIN - cardW, h: cardHeight() };
+}
+
+function cardsBottom() {
+  const learning = learningRect();
+  return learning.y + learning.h;
+}
+
+/** Top of the floor buttons (start, restart, bursts), above the footer. */
+function buttonsTop() {
+  return view.H - ui(24) - ui(34);
+}
+
+/**
+ * Where the intersection is drawn: centered between the cards and the buttons, with a scale
+ * (pixels per meter) that shows about 35 m of every approach.
+ */
+function crossing() {
+  const top = cardsBottom() + 10;
+  const bottom = buttonsTop() - 6;
+  const cx = Math.round(view.W / 2);
+  const cy = Math.round((top + bottom) / 2);
+  const half = Math.min((bottom - top) / 2, view.W / 2);
+  const ppm = Math.max(3.5, Math.min(10, half / 33));
+  return { cx, cy, ppm };
+}
+
+function render() {
+  layout();
+  const g = ctx;
+  const w = view.W;
+  const h = view.H;
+  g.setTransform(view.ratio * view.scale, 0, 0, view.ratio * view.scale, 0, 0);
+  g.textBaseline = 'alphabetic';
+
+  const now = (performance.now() - startMillis) / 1000;
+  const geometry = crossing();
+  updateStepRate();
+
+  paintBackdrop(g, w, h, geometry);
+  paintCars(g, geometry);
+  paintLights(g, geometry, now);
+  paintRunButton(g);
+  paintBurstButtons(g, w);
+  paintToast(g, w, now);
+
+  paintTelemetry(g, telemetryRect(), now);
+  paintLearning(g, learningRect());
+  paintFooter(g, w, h);
+  requestAnimationFrame(render);
+}
+
+function updateStepRate() {
+  const now = performance.now();
+  const elapsed = (now - rateSampleMillis) / 1000;
+  if (elapsed >= 0.5) {
+    stepsPerSecond = (stepCount - rateSampleSteps) / elapsed;
+    rateSampleSteps = stepCount;
+    rateSampleMillis = now;
+  }
+}
+
+// ----- static scenery (cached): city blocks, roads, markings -----
+
+function paintBackdrop(g, w, h, geometry) {
+  const key = [canvas.width, canvas.height, view.scale, view.ratio, T.version,
+    geometry.cx, geometry.cy, geometry.ppm].join('|');
+  if (!backdrop || backdropKey !== key) {
+    backdrop = buildBackdrop(w, h, geometry);
+    backdropKey = key;
+  }
+  g.drawImage(backdrop, 0, 0, w, h);
+}
+
+function buildBackdrop(w, h, { cx, cy, ppm }) {
+  const image = document.createElement('canvas');
+  image.width = canvas.width;
+  image.height = canvas.height;
+  const g = image.getContext('2d');
+  const k = view.ratio * view.scale;
+  g.setTransform(k, 0, 0, k, 0, 0);
+
+  // Ground
+  g.fillStyle = linear(g, 0, 0, rgba(T.BG_TOP), 0, h, rgba(T.BG_MID));
+  g.fillRect(0, 0, w, h);
+  paintGlow(g, w * 0.2, h * 0.15, w * 0.4, T.VIOLET, T.dark ? 40 : 30);
+  paintGlow(g, w * 0.85, h * 0.8, w * 0.35, T.PINK, T.dark ? 22 : 18);
+
+  const road = ROAD_HALF * ppm;
+  const walk = road + 3 * ppm;
+
+  // City blocks with rooftops, in the four corners
+  const random = seededRandom(11);
+  const blocks = [
+    [0, 0, cx - walk, cy - walk], [cx + walk, 0, w, cy - walk],
+    [0, cy + walk, cx - walk, h], [cx + walk, cy + walk, w, h],
+  ];
+  for (const [x0, y0, x1, y1] of blocks) {
+    if (x1 - x0 < 4 || y1 - y0 < 4) continue;
+    g.fillStyle = rgba(T.SIDEWALK);
+    g.fillRect(x0, y0, x1 - x0, y1 - y0);
+    const inset = 2.5 * ppm;
+    const bx0 = x0 === 0 ? -inset : x0 + inset;
+    const by0 = y0 === 0 ? -inset : y0 + inset;
+    const bx1 = x1 === w ? w + inset : x1 - inset;
+    const by1 = y1 === h ? h + inset : y1 - inset;
+    roundRectPath(g, bx0, by0, bx1 - bx0, by1 - by0, 3 * ppm);
+    g.fillStyle = rgba(T.BLOCK);
+    g.fill();
+    paintBuildings(g, bx0, by0, bx1, by1, ppm, random);
+    paintTrees(g, x0, y0, x1, y1, cx, cy, walk, ppm, random);
+  }
+
+  // Asphalt
+  g.fillStyle = rgba(T.ASPHALT);
+  g.fillRect(0, cy - road, w, 2 * road);
+  g.fillRect(cx - road, 0, 2 * road, h);
+  // Curbs
+  setStroke(g, 1.2, false);
+  g.strokeStyle = rgba(T.INK, T.dark ? 30 : 60);
+  for (const s of [-1, 1]) {
+    strokeLine(g, 0, cy + s * road, cx - road, cy + s * road);
+    strokeLine(g, cx + road, cy + s * road, w, cy + s * road);
+    strokeLine(g, cx + s * road, 0, cx + s * road, cy - road);
+    strokeLine(g, cx + s * road, cy + road, cx + s * road, h);
+  }
+
+  // Center lines: double yellow, from the stop lines outwards
+  const stop = STOP_FROM_CENTER * ppm;
+  g.strokeStyle = rgba(T.AMBER, T.dark ? 150 : 220);
+  setStroke(g, 1.2, false);
+  for (const offset of [-1.6, 1.6]) {
+    strokeLine(g, 0, cy + offset, cx - stop, cy + offset);
+    strokeLine(g, cx + stop, cy + offset, w, cy + offset);
+    strokeLine(g, cx + offset, 0, cx + offset, cy - stop);
+    strokeLine(g, cx + offset, cy + stop, cx + offset, h);
+  }
+
+  // Crosswalks (zebra) between the box and the stop lines
+  const marking = rgba(T.MARKING, T.dark ? 70 : 200);
+  g.fillStyle = marking;
+  const stripe = 0.5 * ppm;
+  const near = (ROAD_HALF + 0.8) * ppm;
+  const far = (STOP_FROM_CENTER - 1) * ppm;
+  for (let s = -road + stripe * 0.6; s < road - stripe * 0.5; s += stripe * 2) {
+    g.fillRect(cx + s, cy - far, stripe, far - near);        // north
+    g.fillRect(cx + s, cy + near, stripe, far - near);       // south
+    g.fillRect(cx - far, cy + s, far - near, stripe);        // west
+    g.fillRect(cx + near, cy + s, far - near, stripe);       // east
+  }
+
+  // Stop lines, only across the lane that arrives
+  g.fillStyle = rgba(T.MARKING, T.dark ? 170 : 255);
+  const line = Math.max(2, 0.45 * ppm);
+  g.fillRect(cx - road, cy - stop - line / 2, road, line);    // from the north (west half)
+  g.fillRect(cx, cy + stop - line / 2, road, line);           // from the south (east half)
+  g.fillRect(cx - stop - line / 2, cy, line, road);           // from the west (south half)
+  g.fillRect(cx + stop - line / 2, cy - road, line, road);    // from the east (north half)
+
+  // Arrows painted on each approach lane
+  g.fillStyle = rgba(T.MARKING, T.dark ? 45 : 140);
+  for (let i = 0; i < 4; i++) {
+    const p = worldPoint(i, STOP_S - 14, cx, cy, ppm);
+    paintLaneArrow(g, p.x, p.y, p.angle, ppm);
+  }
+
+  // Vignette
+  const radius = Math.max(w, h) * 0.78;
+  g.fillStyle = radial(g, w / 2, h / 2, radius,
+      [[0.55, 'rgba(0,0,0,0)'], [1, `rgba(0,0,0,${(T.dark ? 150 : 40) / 255})`]]);
+  g.fillRect(0, 0, w, h);
+  return image;
+}
+
+function paintGlow(g, cx, cy, radius, color, alpha) {
+  g.fillStyle = radial(g, cx, cy, radius, [[0, rgba(color, alpha)], [1, rgba(color, 0)]]);
+  circlePath(g, cx, cy, radius);
+  g.fill();
+}
+
+/** Rooftops seen from above, packed in rows inside a block. */
+function paintBuildings(g, x0, y0, x1, y1, ppm, random) {
+  const gap = 1.6 * ppm;
+  const tints = [T.VIOLET, T.CYAN, T.TEAL, T.PINK];
+  let y = y0 + gap;
+  while (y < y1 - gap * 2) {
+    const rowH = (9 + random() * 10) * ppm;
+    let x = x0 + gap;
+    const bottom = Math.min(y + rowH, y1 - gap);
+    while (x < x1 - gap * 2) {
+      const bw = (8 + random() * 14) * ppm;
+      const right = Math.min(x + bw, x1 - gap);
+      if (right - x > 3 * ppm && bottom - y > 3 * ppm) {
+        const tint = tints[Math.floor(random() * tints.length)];
+        const roof = mix(T.ROOF, tint, T.dark ? 0.06 + random() * 0.1 : 0.05 + random() * 0.08);
+        // Shadow, roof, top light
+        roundRectPath(g, x + 0.8 * ppm, y + 0.8 * ppm, right - x, bottom - y, ppm);
+        g.fillStyle = `rgba(0,0,0,${T.dark ? 0.35 : 0.12})`;
+        g.fill();
+        roundRectPath(g, x, y, right - x, bottom - y, ppm);
+        g.fillStyle = linear(g, x, y, rgba(mix(roof, WHITE, T.dark ? 0.06 : 0.25)), right, bottom, rgba(roof));
+        g.fill();
+        setStroke(g, 1, false);
+        g.strokeStyle = rgba(T.INK, T.dark ? 16 : 30);
+        g.stroke();
+        // A rooftop unit or a lit skylight
+        if (random() < 0.6) {
+          const ux = x + (right - x) * (0.2 + random() * 0.5);
+          const uy = y + (bottom - y) * (0.2 + random() * 0.5);
+          const size = (1.5 + random() * 2) * ppm;
+          roundRectPath(g, ux, uy, size, size * 0.8, ppm * 0.5);
+          g.fillStyle = T.dark && random() < 0.5 ? rgba(T.AMBER, 70) : rgba(T.INK, T.dark ? 22 : 30);
+          g.fill();
+        }
+      }
+      x = right + gap;
+    }
+    y = bottom + gap;
+  }
+}
+
+/** Trees along the sidewalks next to the roads. */
+function paintTrees(g, x0, y0, x1, y1, cx, cy, walk, ppm, random) {
+  const spacing = 11 * ppm;
+  const r = 1.6 * ppm;
+  const tree = (x, y) => {
+    if (x < x0 + r || x > x1 - r || y < y0 + r || y > y1 - r) return;
+    fillCircle(g, x + 0.5 * ppm, y + 0.6 * ppm, r, `rgba(0,0,0,${T.dark ? 0.3 : 0.12})`);
+    fillCircle(g, x, y, r * (0.85 + random() * 0.3), rgba(mix(T.GREEN, T.BLOCK, T.dark ? 0.55 : 0.25)));
+    fillCircle(g, x - r * 0.3, y - r * 0.3, r * 0.45, rgba(mix(T.GREEN, WHITE, 0.2), T.dark ? 50 : 90));
+  };
+  const along = 1.4 * ppm;
+  const horizontalY = y0 < cy ? y1 - along : y0 + along;
+  const verticalX = x0 < cx ? x1 - along : x0 + along;
+  for (let x = cx - walk - spacing; x > 0; x -= spacing) tree(x, horizontalY);
+  for (let x = cx + walk + spacing; x < view.W; x += spacing) tree(x, horizontalY);
+  for (let y = cy - walk - spacing; y > 0; y -= spacing) tree(verticalX, y);
+  for (let y = cy + walk + spacing; y < view.H; y += spacing) tree(verticalX, y);
+}
+
+function paintLaneArrow(g, x, y, angle, ppm) {
+  g.save();
+  g.translate(x, y);
+  g.rotate(angle);
+  const len = 4 * ppm;
+  g.fillRect(-len / 2, -0.25 * ppm, len * 0.6, 0.5 * ppm);
+  g.beginPath();
+  g.moveTo(len / 2, 0);
+  g.lineTo(len * 0.1, -0.9 * ppm);
+  g.lineTo(len * 0.1, 0.9 * ppm);
+  g.closePath();
+  g.fill();
+  g.restore();
+}
+
+/**
+ * Screen point of a position s along an approach lane (right-hand traffic), plus the heading.
+ * Cars from the north drive down on the west half, from the south up on the east half, and so on.
+ */
+function worldPoint(approach, s, cx, cy, ppm) {
+  const d = s - (STOP_S + STOP_FROM_CENTER);   // negative before the center of the box
+  const lane = LANE_W / 2;
+  let x;
+  let y;
+  let angle;
+  switch (APPROACHES[approach].id) {
+    case 'N': x = -lane; y = d; angle = Math.PI / 2; break;
+    case 'S': x = lane; y = -d; angle = -Math.PI / 2; break;
+    case 'W': x = d; y = lane; angle = 0; break;
+    default: x = -d; y = -lane; angle = Math.PI; break;
+  }
+  return { x: cx + x * ppm, y: cy + y * ppm, angle };
+}
+
+// ----- cars -----
+
+function carColor(index) {
+  return [T.CYAN, T.VIOLET, T.PINK, T.TEAL, T.AMBER, T.SILVER][index];
+}
+
+function paintCars(g, { cx, cy, ppm }) {
+  const lanes = model.main.lanes;
+  const length = CAR_LENGTH * ppm;
+  const width = 1.9 * ppm;
+  // Headlight beams first, so they stay under every car.
+  if (T.dark) {
+    for (let i = 0; i < lanes.length; i++) {
+      for (const car of lanes[i].cars) {
+        const p = worldPoint(i, car.s, cx, cy, ppm);
+        if (!onScreen(p, length * 3)) continue;
+        g.save();
+        g.translate(p.x, p.y);
+        g.rotate(p.angle);
+        const beam = 7 * ppm;
+        g.fillStyle = linear(g, 0, 0, 'rgba(255,240,200,0.16)', beam, 0, 'rgba(255,240,200,0)');
+        g.beginPath();
+        g.moveTo(0, -width * 0.35);
+        g.lineTo(beam, -width * 0.9);
+        g.lineTo(beam, width * 0.9);
+        g.lineTo(0, width * 0.35);
+        g.closePath();
+        g.fill();
+        g.restore();
+      }
+    }
+  }
+  for (let i = 0; i < lanes.length; i++) {
+    for (const car of lanes[i].cars) {
+      const p = worldPoint(i, car.s, cx, cy, ppm);
+      if (!onScreen(p, length * 2)) continue;
+      paintCar(g, p, car, length, width, ppm);
+    }
+  }
+}
+
+function onScreen(p, margin) {
+  return p.x > -margin && p.x < view.W + margin && p.y > -margin && p.y < view.H + margin;
+}
+
+/** One car seen from above; the front bumper is at p. */
+function paintCar(g, p, car, length, width, ppm) {
+  const color = carColor(car.color);
+  g.save();
+  g.translate(p.x, p.y);
+  g.rotate(p.angle);
+  // Shadow and body
+  roundRectPath(g, -length + 0.4 * ppm, -width / 2 + 0.5 * ppm, length, width, width * 0.55);
+  g.fillStyle = `rgba(0,0,0,${T.dark ? 0.4 : 0.18})`;
+  g.fill();
+  roundRectPath(g, -length, -width / 2, length, width, width * 0.55);
+  g.fillStyle = linear(g, 0, -width / 2, rgba(mix(color, WHITE, 0.22)), 0, width / 2, rgba(mix(color, BLACK, 0.25)));
+  g.fill();
+  // Cabin glass
+  const glass = rgba(T.dark ? hex(0x0A0F22) : hex(0x1C2436), 200);
+  roundRectPath(g, -length * 0.7, -width * 0.36, length * 0.48, width * 0.72, width * 0.3);
+  g.fillStyle = glass;
+  g.fill();
+  roundRectPath(g, -length * 0.62, -width * 0.3, length * 0.3, width * 0.6, width * 0.2);
+  g.fillStyle = rgba(mix(color, WHITE, 0.15));
+  g.fill();
+  // Headlights and brake lights
+  const lamp = Math.max(1, 0.32 * ppm);
+  g.fillStyle = T.dark ? 'rgba(255,246,214,0.95)' : 'rgba(255,255,255,0.9)';
+  g.fillRect(-lamp * 1.2, -width / 2 + lamp * 0.5, lamp, lamp * 1.4);
+  g.fillRect(-lamp * 1.2, width / 2 - lamp * 1.9, lamp, lamp * 1.4);
+  const braking = car.a < -0.8 || (!car.crossed && car.v < 0.5);
+  if (braking) {
+    const glow = car.a < -0.8 ? 1 : 0.8;
+    g.fillStyle = `rgba(255,60,70,${glow})`;
+    g.fillRect(-length + lamp * 0.2, -width / 2 + lamp * 0.5, lamp, lamp * 1.4);
+    g.fillRect(-length + lamp * 0.2, width / 2 - lamp * 1.9, lamp, lamp * 1.4);
+    if (T.dark) {
+      g.fillStyle = radial(g, -length, 0, width, [[0, 'rgba(255,60,70,0.35)'], [1, 'rgba(255,60,70,0)']]);
+      circlePath(g, -length, 0, width);
+      g.fill();
+    }
+  } else {
+    g.fillStyle = 'rgba(160,30,40,0.8)';
+    g.fillRect(-length + lamp * 0.2, -width / 2 + lamp * 0.5, lamp * 0.8, lamp * 1.4);
+    g.fillRect(-length + lamp * 0.2, width / 2 - lamp * 1.9, lamp * 0.8, lamp * 1.4);
+  }
+  g.restore();
+}
+
+// ----- traffic lights -----
+
+/** Where each approach's light stands: at the near right corner, before the stop line. */
+function lightPlacement(approach, { cx, cy, ppm }) {
+  const side = (ROAD_HALF + 2.2) * ppm;
+  const along = (STOP_FROM_CENTER + 1.5) * ppm;
+  switch (APPROACHES[approach].id) {
+    case 'N': return { x: cx - side, y: cy - along, vertical: true, outward: [-1, 0] };
+    case 'S': return { x: cx + side, y: cy + along, vertical: true, outward: [1, 0] };
+    case 'W': return { x: cx - along, y: cy + side, vertical: false, outward: [0, 1] };
+    default: return { x: cx + along, y: cy - side, vertical: false, outward: [0, -1] };
+  }
+}
+
+function lampColor(light) {
+  return light === 'G' ? T.GREEN : light === 'Y' ? T.AMBER : T.ROSE;
+}
+
+function paintLights(g, geometry, now) {
+  const r = ui(4.4);
+  const main = model.main;
+  const waiting = waitingPerApproach(main);
+  for (let i = 0; i < APPROACHES.length; i++) {
+    const light = main.light(i);
+    const place = lightPlacement(i, geometry);
+    const long = 6 * r + 10;
+    const short = 2 * r + 8;
+    const w = place.vertical ? short : long;
+    const h = place.vertical ? long : short;
+    const x = place.x - w / 2;
+    const y = place.y - h / 2;
+    // Glow of the lit lamp on the ground
+    const order = ['R', 'Y', 'G'];
+    const lit = order.indexOf(light);
+    const lampAt = k => (place.vertical
+      ? { x: place.x, y: y + 5 + r + k * (2 * r + 0) }
+      : { x: x + 5 + r + k * (2 * r + 0), y: place.y });
+    const litPoint = lampAt(lit);
+    const color = lampColor(light);
+    if (T.dark) {
+      g.fillStyle = radial(g, litPoint.x, litPoint.y, r * 5, [[0, rgba(color, 90)], [1, rgba(color, 0)]]);
+      circlePath(g, litPoint.x, litPoint.y, r * 5);
+      g.fill();
+    }
+    roundRectPath(g, x, y, w, h, short * 0.8);
+    g.fillStyle = rgba(T.HOUSING, 235);
+    g.fill();
+    setStroke(g, hoverCrossing ? 1.6 : 1, false);
+    g.strokeStyle = hoverCrossing ? rgba(T.CYAN) : rgba(T.INK, T.dark ? 50 : 90);
+    g.stroke();
+    for (let k = 0; k < 3; k++) {
+      const p = lampAt(k);
+      if (k === lit) {
+        fillCircle(g, p.x, p.y, r, rgba(color));
+        fillCircle(g, p.x - r * 0.3, p.y - r * 0.3, r * 0.35, 'rgba(255,255,255,0.55)');
+      } else {
+        fillCircle(g, p.x, p.y, r, rgba(T.LAMP_OFF));
+      }
+    }
+    paintQueueBadge(g, place, w, h, waiting[i], color);
+  }
+}
+
+function waitingPerApproach(intersection) {
+  return intersection.lanes.map(lane => {
+    let n = lane.backlog.length;
+    for (const car of lane.cars) if (!car.crossed && car.v < WAITING_SPEED) n++;
+    return n;
+  });
+}
+
+/** How many cars are waiting on that approach, next to its light. */
+function paintQueueBadge(g, place, w, h, count, color) {
+  setFont(g, MONO, true, 10.5);
+  const text = String(count);
+  const bh = ui(18);
+  const bw = Math.max(bh, textWidth(g, text) + ui(12));
+  const [ox, oy] = place.outward;
+  const bx = place.x + ox * (w / 2 + 5 + bw / 2) - bw / 2;
+  const by = place.y + oy * (h / 2 + 5 + bh / 2) - bh / 2;
+  roundRectPath(g, bx, by, bw, bh, bh);
+  g.fillStyle = rgba(T.BG_TOP, 215);
+  g.fill();
+  setStroke(g, 1.2, false);
+  g.strokeStyle = rgba(color, count > 0 ? 220 : 110);
+  g.stroke();
+  g.fillStyle = count > 0 ? rgba(T.TEXT) : rgba(T.MUTED);
+  g.fillText(text, bx + (bw - textWidth(g, text)) / 2, baselineIn(g, by, bh));
+}
+
+// ----- HUD -----
+
+function paintCard(g, x, y, w, h, title) {
+  roundRectPath(g, x, y, w, h, 18);
+  g.fillStyle = rgba(T.CARD);
+  g.fill();
+  g.fillStyle = linear(g, 0, y, 'rgba(255,255,255,0.07)', 0, y + 48, 'rgba(255,255,255,0)');
+  g.fill();
+  setStroke(g, 1, false);
+  g.strokeStyle = rgba(T.INK, 26);
+  g.stroke();
+
+  setFont(g, SANS, true, 10.5, 0.14);
+  g.fillStyle = rgba(T.MUTED);
+  g.fillText(title, x + 18, y + ui(25));
+  setFont(g, SANS, false, 10);
+}
+
+/** Average wait of the cars that crossed recently (current chart period, or the last bar). */
+function recentDelay() {
+  const main = model.main;
+  if (main.delayCount >= 5 || model.log.length === 0) {
+    return main.delayCount > 0 ? main.delaySum / main.delayCount : 0;
+  }
+  return model.log[model.log.length - 1].delay;
+}
+
+/** Cars that crossed per minute, recently (vazão). */
+function recentFlow() {
+  const main = model.main;
+  const last = model.log[model.log.length - 1];
+  if (model.periodTime < 30 && last) return last.crossed / (TrafficModel.PERIOD / 60);
+  return model.periodTime > 0 ? main.delayCount / (model.periodTime / 60) : 0;
+}
+
+function paintTelemetry(g, card, now) {
+  const { x, y, w, h } = card;
+  paintCard(g, x, y, w, h, L.telemetry);
+
+  const status = running ? L.running : L.paused;
+  const color = running ? T.GREEN : T.MUTED;
+  setFont(g, SANS, true, 10, 0.1);
+  const pillW = textWidth(g, status) + ui(30);
+  const pillH = ui(20);
+  const pillX = x + w - 14 - pillW;
+  const pillY = y + ui(10);
+  roundRectPath(g, pillX, pillY, pillW, pillH, pillH);
+  g.fillStyle = rgba(color, 34);
+  g.fill();
+  const pulse = running ? 0.5 + 0.5 * Math.sin(now * 5) : 1;
+  fillCircle(g, pillX + ui(11), pillY + pillH / 2, ui(3.5), rgba(color, Math.trunc(90 + 165 * pulse)));
+  g.fillStyle = rgba(color);
+  g.fillText(status, pillX + ui(20), baselineIn(g, pillY, pillH));
+
+  const main = model.main;
+  const road = L.roads[main.phase];
+  let phaseText;
+  let phaseColor;
+  if (main.stage === GREEN) {
+    phaseText = L.phaseGreen(road, num(main.stageTime, 0) + ' s');
+    phaseColor = T.GREEN;
+  } else if (main.stage === YELLOW) {
+    phaseText = L.phaseYellow(road);
+    phaseColor = T.AMBER;
+  } else {
+    phaseText = L.phaseAllRed;
+    phaseColor = T.ROSE;
+  }
+  const waiting = main.waitingByPhase();
+  let decisionText;
+  let decisionColor = T.TEXT;
+  if (model.mode === FIXED) {
+    const left = main.stage === GREEN ? Math.max(0, model.fixedGreen - main.stageTime) : 0;
+    decisionText = L.fixedIn(num(Math.ceil(left), 0) + ' s');
+  } else if (model.lastDecision) {
+    const d = model.lastDecision;
+    const word = d.switch ? L.change : L.keep;
+    decisionText = model.mode === LEARN ? `${word} · ${num(d.probability * 100, 0)}%` : word;
+    decisionColor = d.switch ? T.PINK : T.TEAL;
+  } else {
+    decisionText = '—';
+  }
+  const narrow = view.narrow;
+  const rows = [
+    ['◉', L.phase, phaseText, phaseColor],
+    ['↕', L.queue(L.roads[NS]), L.cars(waiting[NS]), T.TEXT],
+    ['↔', L.queue(L.roads[EW]), L.cars(waiting[EW]), T.TEXT],
+    ['d', narrow ? L.delayShort : L.delay, num(recentDelay(), 1) + ' s', T.TEXT],
+    ['?', L.decision, decisionText, decisionColor],
+    ['η', L.efficiency, num(efficiency(recentDelay()) * 100, 0) + '%', T.GREEN],
+  ];
+
+  // Narrow screens: two columns of three rows, so the card stays short.
+  const columns = narrow ? 2 : 1;
+  const perColumn = rows.length / columns;
+  const columnW = (w - 36 - (columns - 1) * 24) / columns;
+  rows.forEach((row, i) => {
+    const column = Math.floor(i / perColumn);
+    const left = x + 18 + column * (columnW + 24);
+    const rowY = y + ui(58) + (i % perColumn) * ui(22);
+    setFont(g, MONO, true, 13);
+    g.fillStyle = rgba(T.CYAN);
+    g.fillText(row[0], left, rowY);
+    setFont(g, SANS, false, 12);
+    g.fillStyle = rgba(T.MUTED);
+    g.fillText(row[1], left + ui(22), rowY);
+    setFont(g, MONO, false, 13);
+    g.fillStyle = rgba(row[3]);
+    drawRight(g, row[2], left + columnW, rowY);
+  });
+
+  const lineY = y + h - ui(32);
+  setStroke(g, 1, false);
+  g.strokeStyle = rgba(T.INK, 20);
+  strokeLine(g, x + 16, lineY, x + w - 16, lineY);
+  setFont(g, MONO, false, 10);
+  g.fillStyle = rgba(T.MUTED);
+  g.fillText(L.loop(formatClock(model.time), num(recentFlow(), 1), grouped(main.switches)),
+      x + 18, y + h - ui(13));
+}
+
+function modeColor(mode) {
+  return mode === LEARN ? T.CYAN : mode === EXPERT ? T.VIOLET : T.AMBER;
+}
+
+/** Wait of the controlled intersection compared with the fixed-time reference (last 10 bars). */
+function comparison() {
+  const recent = model.log.slice(-10);
+  let delay = 0;
+  let reference = 0;
+  for (const entry of recent) {
+    delay += entry.delay;
+    reference += entry.baseline;
+  }
+  if (recent.length === 0 || reference <= 0) return null;
+  return delay / reference - 1;
+}
+
+/** Learning card: one bar per period (average wait, lower is better) and the rule map. */
+function paintLearning(g, card) {
+  const { x, y, w, h } = card;
+  paintCard(g, x, y, w, h, L.learningSection);
+  setFont(g, SANS, true, 10.5, 0.14);
+  chartToggleBounds = paintChartToggle(g, x + 18 + textWidth(g, L.learningSection) + ui(12), y + ui(10));
+  const right = paintComparison(g, x + w - 14, y + ui(10));
+  setFont(g, MONO, false, 10.5);
+  g.fillStyle = rgba(T.MUTED);
+  const titleEnd = chartToggleBounds.x + chartToggleBounds.w + ui(12);
+  const header = L.periodHeader(num(TrafficModel.PERIOD / 60, 0));
+  if (right - ui(12) - textWidth(g, header) >= titleEnd) drawRight(g, header, right - ui(12), y + ui(25));
+
+  const showMap = w >= ui(380);
+  const mapSize = showMap ? Math.min(h - ui(78), ui(150)) : 0;
+  const chartLeft = x + ui(34);
+  const chartRight = x + w - 18 - (showMap ? mapSize + ui(30) : 0);
+  const chartTop = y + ui(44);
+  const chartBottom = y + h - ui(40);
+  paintPerformanceChart(g, chartLeft, chartTop, chartRight, chartBottom);
+  paintLegend(g, chartLeft, chartRight, y + h - ui(14));
+  if (showMap) paintRuleMap(g, x + w - 18 - mapSize, chartTop, mapSize);
+}
+
+/** Pill with the saving against the fixed-time plan; returns its left edge. */
+function paintComparison(g, right, top) {
+  const value = comparison();
+  if (value === null) return right;
+  let text;
+  let color;
+  if (chartView === 'efficiency') {
+    const recent = model.log.slice(-10);
+    const mean = key => recent.reduce((sum, entry) => sum + entry[key], 0) / recent.length;
+    const mine = Math.round(efficiency(mean('delay')) * 100);
+    const reference = Math.round(efficiency(mean('baseline')) * 100);
+    text = L.efficiencyVersus(mine + '%', reference + '%');
+    color = mine >= reference + 3 ? T.GREEN : mine <= reference - 3 ? T.ROSE : T.MUTED;
+  } else {
+    const percent = Math.round(value * 100);
+    text = L.versusFixed((percent > 0 ? '+' : percent < 0 ? '−' : '') + Math.abs(percent) + '%');
+    color = percent <= -5 ? T.GREEN : percent >= 5 ? T.ROSE : T.MUTED;
+  }
+  setFont(g, SANS, true, 10);
+  const pillH = ui(20);
+  const pillW = textWidth(g, text) + ui(20);
+  const pillX = right - pillW;
+  roundRectPath(g, pillX, top, pillW, pillH, pillH);
+  g.fillStyle = rgba(color, 34);
+  g.fill();
+  g.fillStyle = rgba(color);
+  g.fillText(text, pillX + ui(10), baselineIn(g, top, pillH));
+  return pillX;
+}
+
+/** Smallest round scale (s) that fits the longest wait on the chart. */
+function niceScale(longest) {
+  for (const step of [10, 20, 30, 40, 60, 90, 120, 180, 300, 600, 900, 1800]) {
+    if (longest <= step) return step;
+  }
+  return Math.ceil(longest / 1800) * 1800;
+}
+
+function toggleChartView() {
+  chartView = chartView === 'efficiency' ? 'wait' : 'efficiency';
+}
+
+/** Two-option switch next to the card title: efficiency (higher is better) or wait (lower is better). */
+function paintChartToggle(g, x, top) {
+  setFont(g, SANS, true, 10);
+  const labels = [L.viewEfficiency, L.viewWait];
+  const pad = ui(9);
+  const widths = labels.map(label => textWidth(g, label) + 2 * pad);
+  const h = ui(20);
+  const w = widths[0] + widths[1] + 4;
+  roundRectPath(g, x, top, w, h, h);
+  g.fillStyle = rgba(T.FIELD, 230);
+  g.fill();
+  if (hoverChartToggle) {
+    setStroke(g, 1.2, false);
+    g.strokeStyle = rgba(T.CYAN);
+    g.stroke();
+  }
+  let cx = x + 2;
+  labels.forEach((label, i) => {
+    const selected = (i === 0) === (chartView === 'efficiency');
+    if (selected) {
+      roundRectPath(g, cx, top + 2, widths[i], h - 4, h - 4);
+      g.fillStyle = rgba(i === 0 ? T.GREEN : T.CYAN, 60);
+      g.fill();
+    }
+    g.fillStyle = selected ? rgba(T.TEXT) : rgba(T.MUTED);
+    g.fillText(label, cx + pad, baselineIn(g, top, h));
+    cx += widths[i];
+  });
+  return { x, y: top, w, h };
+}
+
+/**
+ * One bar per period. Efficiency view: ideal time / real time of the cars that crossed
+ * (higher is better). Wait view: their average wait (lower is better). The dashed line is
+ * the fixed-time plan with exactly the same cars.
+ */
+function paintPerformanceChart(g, left, top, right, bottom) {
+  const height = bottom - top;
+  const log = model.log;
+  const main = model.main;
+  const showEfficiency = chartView === 'efficiency';
+  const value = (delay, crossed) => {
+    if (!showEfficiency) return delay;
+    return crossed > 0 ? efficiency(delay) * 100 : null; // no car crossed: nothing to measure
+  };
+  const live = value(main.delayCount > 0 ? main.delaySum / main.delayCount : 0, main.delayCount);
+  const base = model.baseline;
+  const liveReference = value(base.delayCount > 0 ? base.delaySum / base.delayCount : 0, base.delayCount);
+
+  const slots = Math.max(10, Math.trunc((right - left) / ui(5)));
+  const shown = Math.min(log.length, slots - 1); // the last slot is the current period
+  const first = log.length - shown;
+  const slot = (right - left) / slots;
+  const barW = Math.max(1.5, slot * 0.72);
+  const bars = [];
+  const references = [];
+  for (let i = first; i < log.length; i++) {
+    bars.push(value(log[i].delay, log[i].crossed));
+    references.push(value(log[i].baseline, log[i].baselineCrossed));
+  }
+
+  let scale = 100;
+  if (!showEfficiency) {
+    let longest = Math.max(live || 0, liveReference || 0);
+    for (let i = 0; i < bars.length; i++) longest = Math.max(longest, bars[i], references[i]);
+    scale = niceScale(longest);
+  }
+
+  setFont(g, MONO, false, 9.5);
+  setStroke(g, 1, false);
+  for (let k = 0; k <= 4; k++) {
+    const amount = scale * k / 4;
+    const gy = bottom - k / 4 * height;
+    g.strokeStyle = rgba(T.INK, k === 0 ? 40 : 14);
+    strokeLine(g, left, gy, right, gy);
+    g.fillStyle = rgba(T.MUTED);
+    const label = k === 0 ? '0' : num(amount, 0) + (showEfficiency ? '%' : 's');
+    drawRight(g, label, left - 6, gy + 3.5);
+  }
+
+  if (log.length === 0 && main.delayCount === 0) {
+    setFont(g, SANS, false, 11);
+    g.fillStyle = rgba(T.MUTED);
+    const hint = L.emptyChart;
+    if (textWidth(g, hint) <= right - left) g.fillText(hint, (left + right - textWidth(g, hint)) / 2, (top + bottom) / 2);
+  }
+
+  const yFor = amount => bottom - Math.min(amount, scale) / scale * height;
+  const barHeight = amount => Math.max(2, Math.min(amount, scale) / scale * height);
+  for (let i = 0; i < shown; i++) {
+    if (bars[i] === null) continue;
+    const barH = barHeight(bars[i]);
+    const bx = left + i * slot + (slot - barW) / 2;
+    roundRectPath(g, bx, bottom - barH, barW, barH, 3);
+    g.fillStyle = rgba(modeColor(log[first + i].mode), 200);
+    g.fill();
+  }
+
+  // Current period, still filling in
+  if (live !== null) {
+    const liveH = barHeight(live);
+    const liveX = left + shown * slot + (slot - barW) / 2;
+    const liveColor = modeColor(model.mode);
+    roundRectPath(g, liveX, bottom - liveH, barW, liveH, 3);
+    g.fillStyle = rgba(liveColor, 70);
+    g.fill();
+    setStroke(g, 1.2, false);
+    g.strokeStyle = rgba(liveColor);
+    g.stroke();
+  }
+
+  const polyline = (values, average) => {
+    g.beginPath();
+    let started = false;
+    for (let i = 0; i < values.length; i++) {
+      let amount = values[i];
+      if (average) {
+        let sum = 0;
+        let count = 0;
+        for (let k = Math.max(0, i - 9); k <= i; k++) {
+          if (values[k] === null) continue;
+          sum += Math.min(values[k], scale);
+          count++;
+        }
+        amount = count > 0 ? sum / count : null;
+      }
+      if (amount === null) continue;
+      const px = left + i * slot + slot / 2;
+      if (!started) g.moveTo(px, yFor(amount)); else g.lineTo(px, yFor(amount));
+      started = true;
+    }
+  };
+
+  // The fixed-time reference with the same cars (dashed)
+  if (shown >= 1) {
+    polyline(references, false);
+    setStroke(g, 1.6, true, [4, 4]);
+    g.strokeStyle = rgba(T.ROSE, 220);
+    g.stroke();
+    g.setLineDash([]);
+  }
+
+  // Moving average of the last 10 bars: the learning trend
+  if (shown >= 2) {
+    polyline(bars, true);
+    setStroke(g, 5, true);
+    g.strokeStyle = rgba(T.PANEL, 160);
+    g.stroke();
+    setStroke(g, 2.2, true);
+    g.strokeStyle = rgba(T.TEXT);
+    g.stroke();
+  }
+}
+
+function paintLegend(g, x, maxX, baselineY) {
+  const labels = L.legend;
+  const colors = [T.CYAN, T.VIOLET, T.AMBER, T.ROSE, T.TEXT];
+  setFont(g, SANS, false, 9.5);
+  let cx = x;
+  for (let i = 0; i < labels.length; i++) {
+    const labelW = textWidth(g, labels[i]);
+    if (cx + 16 + labelW > maxX) break; // no room left next to the rule map
+    if (i === 3) {
+      setStroke(g, 1.6, true, [3, 3]);
+      g.strokeStyle = rgba(colors[i]);
+      strokeLine(g, cx, baselineY - 4, cx + 12, baselineY - 4);
+      g.setLineDash([]);
+    } else if (i === 4) {
+      setStroke(g, 2.2, true);
+      g.strokeStyle = rgba(colors[i]);
+      strokeLine(g, cx, baselineY - 4, cx + 12, baselineY - 4);
+    } else {
+      roundRectPath(g, cx + 2, baselineY - 9, 8, 9, 2);
+      g.fillStyle = rgba(colors[i]);
+      g.fill();
+    }
+    g.fillStyle = rgba(T.MUTED);
+    g.fillText(labels[i], cx + 16, baselineY);
+    cx += 16 + labelW + ui(10);
+  }
+}
+
+/**
+ * Map of the fuzzy rule base for the current length of the green: cars on the green road
+ * (horizontal) against cars on the red road (vertical). Pink means "switch", teal "keep the
+ * green"; the learner's map starts blank and fills in as it learns.
+ */
+function paintRuleMap(g, x, y, size) {
+  const cells = 24;
+  const cell = size / cells;
+  const urgencies = model.ruleUrgencies();
+  const maxCars = FuzzyRules.QUEUE_CENTERS[FuzzyRules.QUEUE_CENTERS.length - 1];
+  const main = model.main;
+  const greenTime = main.stage === GREEN ? main.stageTime : MIN_GREEN;
+  const state = [0, 0, greenTime];
+  for (let i = 0; i < cells; i++) {
+    for (let j = 0; j < cells; j++) {
+      state[0] = (i + 0.5) / cells * maxCars;
+      state[1] = (1 - (j + 0.5) / cells) * maxCars;
+      const u = FuzzyRules.infer(urgencies, state, heatmapPhi);
+      const intensity = Math.min(1, Math.abs(u) / 4);
+      g.fillStyle = rgba(mix(T.FIELD, u >= 0 ? T.PINK : T.TEAL, intensity));
+      g.fillRect(x + i * cell, y + j * cell, cell + 0.6, cell + 0.6);
+    }
+  }
+  setStroke(g, 1, false);
+  g.strokeStyle = rgba(T.INK, 40);
+  strokeLine(g, x, y + size, x + size, y);   // diagonal: as many cars on both roads
+  g.strokeStyle = rgba(T.INK, 60);
+  g.strokeRect(x, y, size, size);
+
+  // Where the intersection is right now
+  const [green, red] = main.queues();
+  const nx = Math.min(1, green / maxCars);
+  const ny = Math.min(1, red / maxCars);
+  const dotX = x + nx * size;
+  const dotY = y + (1 - ny) * size;
+  setStroke(g, 2, false);
+  g.strokeStyle = rgba(T.INK, 220);
+  circlePath(g, dotX, dotY, 5);
+  g.stroke();
+  fillCircle(g, dotX, dotY, 2, T.dark ? '#FFFFFF' : rgba(T.INK));
+
+  setFont(g, SANS, false, 9.5);
+  g.fillStyle = rgba(T.MUTED);
+  g.fillText(L.mapGreen, x, y + size + ui(12));
+  const titleW = textWidth(g, L.mapTitle);
+  if (textWidth(g, L.mapGreen) + titleW + 8 <= size) drawRight(g, L.mapTitle, x + size, y + size + ui(12));
+  g.save();
+  g.translate(x - 5, y + size);
+  g.rotate(-Math.PI / 2);
+  g.fillText(L.mapRed, 0, 0);
+  g.restore();
+}
+
+function showToast(text, color) {
+  toastText = text;
+  toastColor = color;
+  toastStart = (performance.now() - startMillis) / 1000;
+}
+
+function paintToast(g, w, now) {
+  const age = now - toastStart;
+  if (!toastText || age > 1.8) return;
+  const alpha = age < 1.2 ? 1 : 1 - (age - 1.2) / 0.6;
+  g.save();
+  g.globalAlpha = Math.max(0, alpha);
+  setFont(g, SANS, true, 12);
+  const pillW = textWidth(g, toastText) + ui(32);
+  const pillH = ui(30);
+  const pillX = (w - pillW) / 2;
+  const pillY = cardsBottom() + ui(14);
+  roundRectPath(g, pillX, pillY, pillW, pillH, pillH);
+  g.fillStyle = rgba(T.BG_TOP, 220);
+  g.fill();
+  setStroke(g, 1.4, false);
+  g.strokeStyle = rgba(toastColor);
+  g.stroke();
+  g.fillStyle = rgba(toastColor);
+  g.fillText(toastText, pillX + ui(16), baselineIn(g, pillY, pillH));
+  g.restore();
+}
+
+function paintFooter(g, w, h) {
+  setFont(g, SANS, false, 10);
+  const text = textWidth(g, L.footer) <= w - 2 * HUD_MARGIN ? L.footer : L.footerShort;
+  if (textWidth(g, text) > w - 2 * HUD_MARGIN) return;
+  // A soft band keeps the hint readable over the road.
+  const tw = textWidth(g, text);
+  roundRectPath(g, HUD_MARGIN - 8, h - 12 - ui(13), tw + 16, ui(18), ui(18));
+  g.fillStyle = rgba(T.BG_TOP, 150);
+  g.fill();
+  g.fillStyle = rgba(T.MUTED);
+  g.fillText(text, HUD_MARGIN, h - 12);
+}
+
+/** Start/pause button at the bottom left, with restart next to it. */
+function paintRunButton(g) {
+  setFont(g, SANS, true, 12);
+  const glyph = ui(11);
+  const gap = 6;
+  const bw = glyph + gap + Math.max(textWidth(g, L.start), textWidth(g, L.pause)) + ui(28);
+  const bh = ui(34);
+  const x = HUD_MARGIN;
+  const y = buttonsTop();
+  const hover = hoverRunButton;
+  let foreground;
+  roundRectPath(g, x, y, bw, bh, 12);
+  if (!running) {
+    // Start: filled
+    const top = hover ? mix(T.TEAL, WHITE, 0.18) : T.TEAL;
+    g.fillStyle = linear(g, 0, y, rgba(top), 0, y + bh, rgba(mix(T.TEAL, BLACK, 0.28)));
+    g.fill();
+    if (hover) {
+      setStroke(g, 1, false);
+      g.strokeStyle = 'rgba(255,255,255,0.24)';
+      g.stroke();
+    }
+    foreground = T.dark ? hex(0x041318) : WHITE;
+  } else {
+    // Pause: outlined in rose
+    g.fillStyle = rgba(T.BG_TOP, 200);
+    g.fill();
+    g.fillStyle = rgba(T.ROSE, hover ? 45 : 22);
+    g.fill();
+    setStroke(g, 1.2, false);
+    g.strokeStyle = rgba(T.ROSE, hover ? 230 : 150);
+    g.stroke();
+    foreground = T.dark ? mix(T.ROSE, WHITE, 0.3) : mix(T.ROSE, BLACK, 0.15);
+  }
+
+  const label = running ? L.pause : L.start;
+  const startX = x + (bw - (glyph + gap + textWidth(g, label))) / 2;
+  const cy = y + bh / 2;
+  g.fillStyle = rgba(foreground);
+  if (running) {
+    const bar = glyph * 0.34;
+    roundRectPath(g, startX + 0.5, cy - glyph / 2, bar, glyph, 2);
+    g.fill();
+    roundRectPath(g, startX + glyph - bar - 0.5, cy - glyph / 2, bar, glyph, 2);
+    g.fill();
+  } else {
+    g.beginPath();
+    g.moveTo(startX + 1, cy - glyph / 2);
+    g.lineTo(startX + glyph, cy);
+    g.lineTo(startX + 1, cy + glyph / 2);
+    g.closePath();
+    g.fill();
+  }
+  g.fillText(label, startX + glyph + gap, baselineIn(g, y, bh));
+  runButtonBounds = { x, y, w: bw, h: bh };
+  paintResetButton(g, x + bw + 8, y, bh);
+}
+
+/** Restart button: new day on the same streets, empty chart (the learner keeps what it knows). */
+function paintResetButton(g, x, y, bh) {
+  const label = L.restart;
+  setFont(g, SANS, true, 12);
+  const glyph = ui(11);
+  const gap = 10; // the arrow head sticks out to the right
+  const bw = glyph + gap + textWidth(g, label) + ui(28);
+  const hover = hoverResetButton;
+  roundRectPath(g, x, y, bw, bh, 12);
+  g.fillStyle = rgba(T.BG_TOP, 200);
+  g.fill();
+  g.fillStyle = rgba(T.CYAN, hover ? 45 : 22);
+  g.fill();
+  setStroke(g, 1.2, false);
+  g.strokeStyle = rgba(T.CYAN, hover ? 230 : 150);
+  g.stroke();
+  const foreground = rgba(T.dark ? mix(T.CYAN, WHITE, 0.3) : mix(T.CYAN, BLACK, 0.15));
+  const startX = x + (bw - (glyph + gap + textWidth(g, label))) / 2;
+  paintResetGlyph(g, startX + glyph / 2, y + bh / 2, glyph / 2, foreground);
+  g.fillStyle = foreground;
+  g.fillText(label, startX + glyph + gap, baselineIn(g, y, bh));
+  resetButtonBounds = { x, y, w: bw, h: bh };
+}
+
+/** The two burst buttons at the bottom right: [north-south, east-west]. */
+function burstButtons(w) {
+  const k = view.narrow ? 1.5 : 1; // bigger on phones, easier to tap
+  const bw = ui(48) * k;
+  const bh = ui(34) * k;
+  const gap = 8 * k;
+  const y = buttonsTop() + ui(34) - bh; // bottoms in line with start/restart
+  const right = w - HUD_MARGIN;
+  return [
+    { phase: NS, x: right - 2 * bw - gap, y, w: bw, h: bh, k },
+    { phase: EW, x: right - bw, y, w: bw, h: bh, k },
+  ];
+}
+
+function paintBurstButtons(g, w) {
+  const buttons = burstButtons(w);
+  const now = performance.now();
+  const enabled = canInteract();
+  g.save();
+  if (!enabled) g.globalAlpha = 0.35; // dimmed, like a disabled button
+  for (const b of buttons) {
+    const pressed = pressedBurstButton === b.phase && now - pressedBurstMillis < 200;
+    const hover = enabled && hoverBurstButton === b.phase;
+    roundRectPath(g, b.x, b.y, b.w, b.h, 12);
+    g.fillStyle = rgba(T.BG_TOP, 200);
+    g.fill();
+    g.fillStyle = rgba(T.AMBER, pressed ? 110 : hover ? 60 : 30);
+    g.fill();
+    setStroke(g, pressed || hover ? 1.6 : 1.2, false);
+    g.strokeStyle = rgba(T.AMBER, pressed || hover ? 240 : 150);
+    g.stroke();
+
+    // Double arrow along the road that gets the cars
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    const half = ui(10) * b.k;
+    const head = ui(5) * b.k;
+    g.save();
+    g.translate(cx, cy);
+    if (b.phase === NS) g.rotate(Math.PI / 2);
+    setStroke(g, 3 * b.k, true);
+    g.strokeStyle = rgba(T.AMBER);
+    strokeLine(g, -half + head, 0, half - head, 0);
+    g.fillStyle = rgba(T.AMBER);
+    for (const s of [-1, 1]) {
+      g.beginPath();
+      g.moveTo(s * half, 0);
+      g.lineTo(s * (half - head * 1.4), -head);
+      g.lineTo(s * (half - head * 1.4), head);
+      g.closePath();
+      g.fill();
+    }
+    g.restore();
+  }
+  const first = buttons[0];
+  const last = buttons[1];
+  setFont(g, SANS, true, 11.5);
+  const text = L.burst;
+  const tx = (first.x + last.x + last.w - textWidth(g, text)) / 2;
+  const ty = first.y - ui(8);
+  g.fillStyle = rgba(T.BG_TOP, 150);
+  roundRectPath(g, tx - 6, ty - ui(12), textWidth(g, text) + 12, ui(16), ui(16));
+  g.fill();
+  g.fillStyle = rgba(T.MUTED);
+  g.fillText(text, tx, ty);
+  g.restore();
+}
+
+function burstButtonAt(x, y) {
+  for (const b of burstButtons(view.W)) {
+    if (inside(b, x, y)) return b.phase;
+  }
+  return -1;
+}
+
+/** The intersection box and the four lights are one big "switch the lights" button. */
+function onCrossing(x, y) {
+  const { cx, cy, ppm } = crossing();
+  const reach = (STOP_FROM_CENTER + 4) * ppm;
+  return Math.abs(x - cx) <= reach && Math.abs(y - cy) <= reach;
+}
+
+// ----- mouse and touch interaction -----
+
+function inside(rect, x, y) {
+  return rect && x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+}
+
+/** Pointer position in the scene's logical pixels. */
+function scenePoint(e) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (e.clientX - rect.left) / view.scale, y: (e.clientY - rect.top) / view.scale };
+}
+
+function updateHover(x, y) {
+  hoverBurstButton = burstButtonAt(x, y);
+  hoverRunButton = inside(runButtonBounds, x, y);
+  hoverResetButton = inside(resetButtonBounds, x, y);
+  hoverChartToggle = inside(chartToggleBounds, x, y);
+  hoverCrossing = !hoverRunButton && !hoverResetButton && hoverBurstButton < 0 && !hoverChartToggle
+      && canInteract() && onCrossing(x, y);
+  const clickable = hoverRunButton || hoverResetButton || hoverCrossing || hoverChartToggle
+      || (hoverBurstButton >= 0 && canInteract());
+  canvas.style.cursor = clickable ? 'pointer' : 'default';
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.focus({ preventScroll: true });
+  if (e.button !== 0) return;
+  const p = scenePoint(e);
+  const burst = burstButtonAt(p.x, p.y);
+  if (burst >= 0) {
+    sendBurst(burst);
+    return;
+  }
+  if (inside(chartToggleBounds, p.x, p.y)) {
+    toggleChartView();
+    return;
+  }
+  if (inside(runButtonBounds, p.x, p.y)) {
+    toggleSimulation();
+    hoverRunButton = true;
+    return;
+  }
+  if (inside(resetButtonBounds, p.x, p.y)) {
+    model.restartAndClearChart();
+    return;
+  }
+  if (onCrossing(p.x, p.y)) switchByHand();
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = scenePoint(e);
+  updateHover(p.x, p.y);
+});
+
+canvas.addEventListener('pointerleave', () => {
+  hoverBurstButton = -1;
+  hoverRunButton = false;
+  hoverResetButton = false;
+  hoverCrossing = false;
+  hoverChartToggle = false;
+  canvas.style.cursor = 'default';
+});
+
+// ---------------------------------------------------------------------------
+// Startup
+// ---------------------------------------------------------------------------
+
+/** Copies every slider value into the model (used once, at startup). */
+function applySettings() {
+  speed = speedInput.getValue();
+  model.learningRate = learningRateInput.getValue();
+  model.exploration = explorationInput.getValue();
+  model.fixedGreen = fixedGreenInput.getValue();
+  model.flow[NS] = flowNSInput.getValue();
+  model.flow[EW] = flowEWInput.getValue();
+  model.variation = variationInput.getValue() / 100;
+  model.restartAndClearChart();
+}
+
+/** Small screens: the header goes above the scene; wide screens: back on top of the sidebar. */
+function placeHeader() {
+  const header = document.querySelector('.header');
+  const app = document.getElementById('app');
+  const sidebar = document.getElementById('sidebar');
+  if (window.matchMedia('(max-width: 999px)').matches) {
+    if (header.parentElement !== app) app.insertBefore(header, app.firstChild);
+  } else if (header.parentElement !== sidebar) {
+    sidebar.insertBefore(header, sidebar.firstChild);
+  }
+}
+
+/** Small screens: the speed slider goes right below the scene; wide screens: back in the sidebar. */
+function placeSpeedSlider() {
+  const bar = document.getElementById('speedBar');
+  const slot = document.getElementById('learningSlot');
+  if (window.matchMedia('(max-width: 999px)').matches) {
+    if (speedInput.element.parentElement !== bar) bar.appendChild(speedInput.element);
+  } else if (speedInput.element.parentElement !== slot) {
+    slot.insertBefore(speedInput.element, slot.firstChild);
+  }
+  speedInput.paint();
+}
+
+applyLanguage();
+placeHeader();
+buildSidebar();
+placeSpeedSlider();
+window.matchMedia('(max-width: 999px)').addEventListener('change', () => {
+  placeHeader();
+  placeSpeedSlider();
+});
+applyTheme(loadDarkTheme());
+applySettings();
+// Sliders are drawn at their real width once the layout exists (and again on resize).
+const repaintSliders = new ResizeObserver(() => allSliders.forEach(slider => slider.paint()));
+repaintSliders.observe(document.getElementById('sidebar'));
+repaintSliders.observe(document.getElementById('speedBar'));
+canvas.focus({ preventScroll: true });
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

@@ -114,6 +114,17 @@
       column-gap: 32px; align-content: start; overflow: visible;
     }
     .header { grid-column: 1 / -1; }
+    /* On small screens the header moves to the top of the page (see placeHeader). */
+    #app > .header {
+      height: auto; align-items: center;
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--panel-border);
+    }
+    #app > .header .logo { margin-top: 0; }
+    #app > .header h1 { padding-top: 0; }
+    #app > .header .subtitle { margin-top: 6px; }
+    #app > .header .theme-toggle { margin-top: 0; }
     .group-controller, .group-learning, .group-environment { order: 2; }
   }
   @media (max-width: 380px) {
@@ -2535,7 +2546,7 @@ function paintToast(g, w, now) {
 function paintFooter(g, w, h) {
   setFont(g, SANS, false, 10);
   g.fillStyle = rgba(T.MUTED);
-  const full = 'Espaço iniciar/parar  ·  R reiniciar  ·  M trocar controlador  ·  '
+  const full = 'Espaço iniciar/pausar  ·  R reiniciar  ·  M trocar controlador  ·  '
       + '← → empurrão  ·  G meta  ·  T tema  ·  arraste o carrinho ou a bolinha';
   const short = 'Arraste o carrinho ou a bolinha  ·  toque na meta para ligar/desligar';
   const text = textWidth(g, full) <= w - 2 * HUD_MARGIN ? full : short;
@@ -2545,7 +2556,7 @@ function paintFooter(g, w, h) {
 /** Start/stop button on the floor, at the left, in line with the push buttons. */
 function paintRunButton(g, track) {
   const startLabel = 'Iniciar';
-  const stopLabel = 'Parar';
+  const stopLabel = 'Pausar';
   setFont(g, SANS, true, 12);
   const glyph = ui(11);
   const gap = 6;
@@ -2645,14 +2656,15 @@ function paintResetButton(g, x, y, bh) {
 
 /** The two push buttons on the floor, at the right: [push left, push right]. */
 function pushButtons(w, track) {
-  const bw = ui(48);
-  const bh = ui(34);
-  const gap = 8;
-  const y = track + 46;
+  const k = view.narrow ? 1.5 : 1; // bigger on phones, easier to tap
+  const bw = ui(48) * k;
+  const bh = ui(34) * k;
+  const gap = 8 * k;
+  const y = track + 46 + (ui(34) - bh) / 2; // centered on the start/restart buttons
   const right = w - HUD_MARGIN;
   return [
-    { dir: -1, x: right - 2 * bw - gap, y, w: bw, h: bh },
-    { dir: +1, x: right - bw, y, w: bw, h: bh },
+    { dir: -1, x: right - 2 * bw - gap, y, w: bw, h: bh, k },
+    { dir: +1, x: right - bw, y, w: bw, h: bh, k },
   ];
 }
 
@@ -2675,16 +2687,16 @@ function paintPushButtons(g, w, track) {
     // Arrow pointing where the cart will be pushed
     const cx = b.x + b.w / 2;
     const cy = b.y + b.h / 2;
-    const half = ui(11);
+    const half = ui(11) * b.k;
     const tip = cx + b.dir * half;
-    const shaftEnd = tip - b.dir * ui(8);
-    setStroke(g, 3.5, true);
+    const shaftEnd = tip - b.dir * ui(8) * b.k;
+    setStroke(g, 3.5 * b.k, true);
     g.strokeStyle = rgba(T.AMBER);
     strokeLine(g, cx - b.dir * half, cy, shaftEnd, cy);
     g.beginPath();
     g.moveTo(tip, cy);
-    g.lineTo(shaftEnd, cy - ui(6));
-    g.lineTo(shaftEnd, cy + ui(6));
+    g.lineTo(shaftEnd, cy - ui(6) * b.k);
+    g.lineTo(shaftEnd, cy + ui(6) * b.k);
     g.closePath();
     g.fillStyle = rgba(T.AMBER);
     g.fill();
@@ -2879,6 +2891,20 @@ function applySettings() {
   model.restartEpisode();
 }
 
+/** Small screens: the header goes above the scene; wide screens: back on top of the sidebar. */
+function placeHeader() {
+  const header = document.querySelector('.header');
+  const app = document.getElementById('app');
+  const sidebar = document.getElementById('sidebar');
+  if (window.matchMedia('(max-width: 999px)').matches) {
+    if (header.parentElement !== app) app.insertBefore(header, app.firstChild);
+  } else if (header.parentElement !== sidebar) {
+    sidebar.insertBefore(header, sidebar.firstChild);
+  }
+}
+
+placeHeader();
+window.matchMedia('(max-width: 999px)').addEventListener('change', placeHeader);
 buildSidebar();
 applyTheme(loadDarkTheme());
 applySettings();

@@ -708,9 +708,9 @@ class CartPoleModel {
     this.learningRate = 1;
     this.exploration = 3;
     this.initialAngle = toRadians(6);
-    this.pushStrength = 0;
+    this.pushStrength = 3;
     this.goalEnabled = true;
-    this.pushChance = 0.3;
+    this.pushChance = 0;
     this.expertSkill = 0.4;
     this.trackHalf = 2.0;
     this.startEpisode();
@@ -747,8 +747,8 @@ class CartPoleModel {
   }
 
   /** A short push on the cart, like a bump on the arm (+1 = to the right). */
-  pushCart(direction) {
-    this.push = direction * CartPoleModel.KEYBOARD_PUSH;
+  pushCart(direction, strength = CartPoleModel.KEYBOARD_PUSH) {
+    this.push = direction * strength;
     this.pushTimeLeft = CartPoleModel.PUSH_DURATION;
   }
 
@@ -1251,9 +1251,9 @@ const explorationInput = new ValueSlider('Exploração (ruído)', 0, 6, 0.5, 3,
     v => num(v, 1) + ' N', () => T.VIOLET, 2, 4);
 const initialAngleInput = new ValueSlider('Inclinação inicial', 1, 15, 1, 6,
     v => '±' + num(v, 0) + '°', () => T.TEAL, 1, 5);
-const pushInput = new ValueSlider('Força do empurrão', 0, 10, 0.5, 0,
+const pushInput = new ValueSlider('Força do empurrão', 0, 10, 0.5, 3,
     v => num(v, 1) + ' N', () => T.AMBER, 2, 10);
-const pushChanceInput = new ValueSlider('Chance de empurrão', 0, 100, 5, 30,
+const pushChanceInput = new ValueSlider('Chance de empurrão', 0, 100, 5, 0,
     v => num(v, 0) + '% por s', () => T.AMBER, 2, 10);
 const cartMassInput = new ValueSlider('Massa do carrinho', 0.1, 20, 0.1, 1.1,
     v => num(v, 1) + ' kg', () => T.AMBER, 10, 50);
@@ -1510,6 +1510,9 @@ let stepsPerSecond = 0;
 let goalToggleBounds = null;
 let startHintBounds = null;
 let hoverGoalToggle = false;
+let hoverPushButton = 0;     // -1 = left button, +1 = right button, 0 = none
+let pressedPushButton = 0;
+let pressedPushMillis = 0;
 let seenEndCounter = -1;
 let toastText = null;
 let toastColor = null;
@@ -1630,6 +1633,7 @@ function render() {
   paintTrail(g, track);
   paintRig(g, screenX(model.x), track, now);
   paintStartHint(g, w, track, now);
+  paintPushButtons(g, w, track);
   paintToast(g, w, now);
 
   // Cards become see-through while the pole passes behind them.
@@ -2565,7 +2569,9 @@ function paintStartHint(g, w, track, now) {
   setFont(g, SANS, true, 13);
   const pillW = textWidth(g, message) + ui(52);
   const pillH = ui(34);
-  const pillX = (w - pillW) / 2;
+  // Centered, but moved left when it would cover the push buttons.
+  const buttonsLeft = pushButtons(w, track)[0].x;
+  const pillX = Math.max(HUD_MARGIN, Math.min((w - pillW) / 2, buttonsLeft - 16 - pillW));
   const pillY = track + 46;
   const pulse = 0.6 + 0.4 * Math.sin(now * 3);
 
@@ -2588,6 +2594,67 @@ function paintStartHint(g, w, track, now) {
   g.fillStyle = rgba(T.TEXT);
   g.fillText(message, pillX + ui(38), baselineIn(g, pillY, pillH));
   startHintBounds = { x: pillX, y: pillY, w: pillW, h: pillH };
+}
+
+/** The two push buttons on the floor, at the right: [push left, push right]. */
+function pushButtons(w, track) {
+  const bw = ui(48);
+  const bh = ui(34);
+  const gap = 8;
+  const y = track + 46;
+  const right = w - HUD_MARGIN;
+  return [
+    { dir: -1, x: right - 2 * bw - gap, y, w: bw, h: bh },
+    { dir: +1, x: right - bw, y, w: bw, h: bh },
+  ];
+}
+
+/** Buttons that push the cart (like the arrow keys); also the way to push on touch screens. */
+function paintPushButtons(g, w, track) {
+  const buttons = pushButtons(w, track);
+  const now = performance.now();
+  for (const b of buttons) {
+    const pressed = pressedPushButton === b.dir && now - pressedPushMillis < CartPoleModel.PUSH_DURATION * 1000;
+    const hover = hoverPushButton === b.dir;
+    roundRectPath(g, b.x, b.y, b.w, b.h, 12);
+    g.fillStyle = rgba(T.BG_TOP, 200);
+    g.fill();
+    g.fillStyle = rgba(T.AMBER, pressed ? 110 : hover ? 60 : 30);
+    g.fill();
+    setStroke(g, pressed || hover ? 1.6 : 1.2, false);
+    g.strokeStyle = rgba(T.AMBER, pressed || hover ? 240 : 150);
+    g.stroke();
+
+    // Arrow pointing where the cart will be pushed
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    const half = ui(11);
+    const tip = cx + b.dir * half;
+    const shaftEnd = tip - b.dir * ui(8);
+    setStroke(g, 3.5, true);
+    g.strokeStyle = rgba(T.AMBER);
+    strokeLine(g, cx - b.dir * half, cy, shaftEnd, cy);
+    g.beginPath();
+    g.moveTo(tip, cy);
+    g.lineTo(shaftEnd, cy - ui(6));
+    g.lineTo(shaftEnd, cy + ui(6));
+    g.closePath();
+    g.fillStyle = rgba(T.AMBER);
+    g.fill();
+  }
+  const first = buttons[0];
+  const last = buttons[1];
+  setFont(g, SANS, false, 9.5);
+  g.fillStyle = rgba(T.MUTED);
+  const text = 'empurrão';
+  g.fillText(text, (first.x + last.x + last.w - textWidth(g, text)) / 2, first.y + first.h + ui(14));
+}
+
+function pushButtonAt(x, y) {
+  for (const b of pushButtons(view.W, trackY())) {
+    if (inside(b, x, y)) return b.dir;
+  }
+  return 0;
 }
 
 // ----- mouse and touch interaction -----
@@ -2618,7 +2685,8 @@ function scenePoint(e) {
 
 function updateHover(x, y) {
   hoverGoalToggle = inside(goalToggleBounds, x, y);
-  if (hoverGoalToggle || inside(startHintBounds, x, y)) {
+  hoverPushButton = pushButtonAt(x, y);
+  if (hoverGoalToggle || hoverPushButton !== 0 || inside(startHintBounds, x, y)) {
     pointer.hoverBob = false;
     pointer.hoverCart = false;
     canvas.style.cursor = 'pointer';
@@ -2640,6 +2708,13 @@ canvas.addEventListener('pointerdown', e => {
   const p = scenePoint(e);
   if (inside(goalToggleBounds, p.x, p.y)) {
     toggleGoal();
+    return;
+  }
+  const push = pushButtonAt(p.x, p.y);
+  if (push !== 0) {
+    model.pushCart(push, model.pushStrength); // the buttons follow the push strength slider
+    pressedPushButton = push;
+    pressedPushMillis = performance.now();
     return;
   }
   if (inside(startHintBounds, p.x, p.y)) {
@@ -2713,6 +2788,7 @@ canvas.addEventListener('pointerleave', () => {
     pointer.hoverBob = false;
     pointer.hoverCart = false;
     hoverGoalToggle = false;
+    hoverPushButton = 0;
     canvas.style.cursor = 'default';
   }
 });
@@ -2722,7 +2798,7 @@ canvas.addEventListener('touchstart', e => {
   const touch = e.touches[0];
   if (!touch) return;
   const p = scenePoint(touch);
-  if (hitTest(p.x, p.y) !== HIT_NONE) e.preventDefault();
+  if (hitTest(p.x, p.y) !== HIT_NONE || pushButtonAt(p.x, p.y) !== 0) e.preventDefault();
 }, { passive: false });
 
 // ---------------------------------------------------------------------------

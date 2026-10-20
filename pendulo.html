@@ -5,11 +5,11 @@
   fuzzy controller (225 rules), fuzzy actor-critic learning, expert with human reflexes,
   colors, light/dark themes, sliders, shortcuts and charts. Open it directly in a browser.
 -->
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Pendulo4 · Equilibrando o cabo de vassoura</title>
+<title>Pendulum · Balancing the broomstick</title>
 <meta name="description" content="Pêndulo invertido com lógica fuzzy e aprendizado por reforço.">
 <style>
   :root {
@@ -151,30 +151,30 @@
     <div class="header">
       <canvas class="logo" id="logo" width="53" height="53" aria-hidden="true"></canvas>
       <div class="titles">
-        <h1>Pêndulo Invertido</h1>
-        <div class="subtitle">fuzzy &nbsp;·&nbsp; aprendizado &nbsp;·&nbsp; RK4</div>
+        <h1 data-i18n="heading">Pêndulo Invertido</h1>
+        <div class="subtitle">fuzzy &nbsp;·&nbsp; <span data-i18n="learningWord">aprendizado</span> &nbsp;·&nbsp; RK4</div>
       </div>
       <button class="theme-toggle" id="themeToggle" tabindex="-1"><canvas id="themeIcon" width="29" height="29"></canvas></button>
     </div>
 
     <section class="group-controller">
-      <div class="section-title">CONTROLADOR</div>
+      <div class="section-title" data-i18n="controller">CONTROLADOR</div>
       <div class="segmented" id="modeControl">
-        <button tabindex="-1" data-index="0">Aprendiz</button>
-        <button tabindex="-1" data-index="1">Especialista</button>
+        <button tabindex="-1" data-index="0" data-i18n="learner">Aprendiz</button>
+        <button tabindex="-1" data-index="1" data-i18n="expert">Especialista</button>
       </div>
       <div class="mode-description" id="modeDescription"></div>
       <div id="skillSlot"></div>
     </section>
 
     <section class="group-learning">
-      <div class="section-title">APRENDIZADO</div>
+      <div class="section-title" data-i18n="learningSection">APRENDIZADO</div>
       <div id="learningSlot"></div>
       <button class="btn secondary" id="btForget" tabindex="-1"></button>
     </section>
 
     <section class="group-environment">
-      <div class="section-title">AMBIENTE</div>
+      <div class="section-title" data-i18n="environment">AMBIENTE</div>
       <div id="environmentSlot"></div>
     </section>
 
@@ -224,11 +224,247 @@ function ui(base) {
 }
 
 // ---------------------------------------------------------------------------
-// Formatting (Brazilian Portuguese: decimal comma)
+// Languages: Portuguese, Spanish and English, chosen from the browser settings
+// ---------------------------------------------------------------------------
+
+const STRINGS = {
+  pt: {
+    htmlLang: 'pt-BR',
+    decimal: ',',
+    title: 'Pêndulo · Equilibrando o cabo de vassoura',
+    description: 'Pêndulo invertido com lógica fuzzy e aprendizado por reforço.',
+    sceneLabel: 'Simulação do pêndulo invertido',
+    heading: 'Pêndulo Invertido',
+    learningWord: 'aprendizado',
+    controller: 'CONTROLADOR',
+    learner: 'Aprendiz',
+    expert: 'Especialista',
+    learningSection: 'APRENDIZADO',
+    environment: 'AMBIENTE',
+    speed: 'Velocidade da simulação',
+    learningRate: 'Taxa de aprendizado',
+    exploration: 'Exploração (ruído)',
+    initialAngle: 'Inclinação inicial',
+    pushStrength: 'Força do empurrão',
+    pushChance: 'Chance de empurrão',
+    perSecond: '% por s',
+    cartMass: 'Massa do carrinho',
+    poleMass: 'Massa da haste',
+    expertSkill: 'Habilidade do especialista',
+    forget: 'Esquecer o que aprendeu',
+    learnDescription: 'Fuzzy + aprendizado por reforço: começa sem saber nada e aprende com cada queda.',
+    expertDescription: 'Regras fixas da teoria de controle, aplicadas com reflexos humanos.',
+    toLightTheme: 'Mudar para o tema claro (T)',
+    toDarkTheme: 'Mudar para o tema escuro (T)',
+    push: 'empurrão',
+    telemetry: 'TELEMETRIA',
+    holding: 'SEGURANDO',
+    running: 'RODANDO',
+    paused: 'PAUSADO',
+    angle: 'ângulo',
+    angularVelocityShort: 'vel. angular',
+    angularVelocity: 'velocidade angular',
+    positionShort: 'posição',
+    position: 'posição no trilho',
+    velocityShort: 'velocidade',
+    velocity: 'velocidade do carrinho',
+    forceShort: 'força',
+    force: 'força inferida',
+    timeShort: 'tempo',
+    time: 'tempo equilibrado',
+    loop: (ms, steps, cycles) => `laço ${ms} ms · ${steps} passos/s · ${cycles} ciclos`,
+    attemptHeader: (n, record) => `tentativa ${n}  ·  recorde ${record}`,
+    attemptHeaderShort: (n, record) => `nº ${n} · ${record}`,
+    goalOn: seconds => `Meta ${seconds} s`,
+    goalOff: 'Sem meta',
+    goalLine: 'meta',
+    emptyChart: 'cada tentativa vira uma barra aqui',
+    legend: ['aprendiz', 'especialista', 'meta atingida', 'média de 10'],
+    mapAngle: 'ângulo θ →',
+    mapTitle: 'mapa das regras',
+    mapAngularVelocity: 'vel. angular ω →',
+    toastGoal: (n, d) => `Meta atingida! Tentativa ${n} equilibrou ${d} s`,
+    toastWall: (n, d) => `Bateu no fim do trilho · tentativa ${n} · ${d} s`,
+    toastFell: (n, d) => `Caiu! Tentativa ${n} · ${d} s`,
+    footer: 'Espaço iniciar/pausar  ·  R reiniciar  ·  M trocar controlador  ·  '
+        + '← → empurrão  ·  G meta  ·  T tema  ·  arraste o carrinho ou a bolinha',
+    footerShort: 'Toque na meta para ligar/desligar',
+    start: 'Iniciar',
+    pause: 'Pausar',
+    restart: 'Reiniciar',
+  },
+  es: {
+    htmlLang: 'es',
+    decimal: ',',
+    title: 'Péndulo · Equilibrando el palo de escoba',
+    description: 'Péndulo invertido con lógica fuzzy y aprendizaje por refuerzo.',
+    sceneLabel: 'Simulación del péndulo invertido',
+    heading: 'Péndulo Invertido',
+    learningWord: 'aprendizaje',
+    controller: 'CONTROLADOR',
+    learner: 'Aprendiz',
+    expert: 'Experto',
+    learningSection: 'APRENDIZAJE',
+    environment: 'ENTORNO',
+    speed: 'Velocidad de la simulación',
+    learningRate: 'Tasa de aprendizaje',
+    exploration: 'Exploración (ruido)',
+    initialAngle: 'Inclinación inicial',
+    pushStrength: 'Fuerza del empujón',
+    pushChance: 'Probabilidad de empujón',
+    perSecond: '% por s',
+    cartMass: 'Masa del carrito',
+    poleMass: 'Masa de la varilla',
+    expertSkill: 'Habilidad del experto',
+    forget: 'Olvidar lo aprendido',
+    learnDescription: 'Fuzzy + aprendizaje por refuerzo: empieza sin saber nada y aprende de cada caída.',
+    expertDescription: 'Reglas fijas de la teoría de control, aplicadas con reflejos humanos.',
+    toLightTheme: 'Cambiar al tema claro (T)',
+    toDarkTheme: 'Cambiar al tema oscuro (T)',
+    push: 'empujón',
+    telemetry: 'TELEMETRÍA',
+    holding: 'SUJETANDO',
+    running: 'EN MARCHA',
+    paused: 'EN PAUSA',
+    angle: 'ángulo',
+    angularVelocityShort: 'vel. angular',
+    angularVelocity: 'velocidad angular',
+    positionShort: 'posición',
+    position: 'posición en el riel',
+    velocityShort: 'velocidad',
+    velocity: 'velocidad del carrito',
+    forceShort: 'fuerza',
+    force: 'fuerza inferida',
+    timeShort: 'tiempo',
+    time: 'tiempo en equilibrio',
+    loop: (ms, steps, cycles) => `bucle ${ms} ms · ${steps} pasos/s · ${cycles} ciclos`,
+    attemptHeader: (n, record) => `intento ${n}  ·  récord ${record}`,
+    attemptHeaderShort: (n, record) => `n.º ${n} · ${record}`,
+    goalOn: seconds => `Meta ${seconds} s`,
+    goalOff: 'Sin meta',
+    goalLine: 'meta',
+    emptyChart: 'cada intento se convierte en una barra aquí',
+    legend: ['aprendiz', 'experto', 'meta alcanzada', 'media de 10'],
+    mapAngle: 'ángulo θ →',
+    mapTitle: 'mapa de reglas',
+    mapAngularVelocity: 'vel. angular ω →',
+    toastGoal: (n, d) => `¡Meta alcanzada! El intento ${n} se equilibró ${d} s`,
+    toastWall: (n, d) => `Chocó con el final del riel · intento ${n} · ${d} s`,
+    toastFell: (n, d) => `¡Se cayó! Intento ${n} · ${d} s`,
+    footer: 'Espacio iniciar/pausar  ·  R reiniciar  ·  M cambiar controlador  ·  '
+        + '← → empujón  ·  G meta  ·  T tema  ·  arrastra el carrito o la bolita',
+    footerShort: 'Toca la meta para activarla o desactivarla',
+    start: 'Iniciar',
+    pause: 'Pausar',
+    restart: 'Reiniciar',
+  },
+  en: {
+    htmlLang: 'en',
+    decimal: '.',
+    title: 'Pendulum · Balancing the broomstick',
+    description: 'Inverted pendulum with fuzzy logic and reinforcement learning.',
+    sceneLabel: 'Inverted pendulum simulation',
+    heading: 'Inverted Pendulum',
+    learningWord: 'learning',
+    controller: 'CONTROLLER',
+    learner: 'Learner',
+    expert: 'Expert',
+    learningSection: 'LEARNING',
+    environment: 'ENVIRONMENT',
+    speed: 'Simulation speed',
+    learningRate: 'Learning rate',
+    exploration: 'Exploration (noise)',
+    initialAngle: 'Initial tilt',
+    pushStrength: 'Push strength',
+    pushChance: 'Push chance',
+    perSecond: '% per s',
+    cartMass: 'Cart mass',
+    poleMass: 'Pole mass',
+    expertSkill: 'Expert skill',
+    forget: 'Forget what it learned',
+    learnDescription: 'Fuzzy + reinforcement learning: starts knowing nothing and learns from every fall.',
+    expertDescription: 'Fixed control theory rules, applied with human reflexes.',
+    toLightTheme: 'Switch to the light theme (T)',
+    toDarkTheme: 'Switch to the dark theme (T)',
+    push: 'push',
+    telemetry: 'TELEMETRY',
+    holding: 'HOLDING',
+    running: 'RUNNING',
+    paused: 'PAUSED',
+    angle: 'angle',
+    angularVelocityShort: 'ang. velocity',
+    angularVelocity: 'angular velocity',
+    positionShort: 'position',
+    position: 'position on rail',
+    velocityShort: 'velocity',
+    velocity: 'cart velocity',
+    forceShort: 'force',
+    force: 'inferred force',
+    timeShort: 'time',
+    time: 'time balanced',
+    loop: (ms, steps, cycles) => `loop ${ms} ms · ${steps} steps/s · ${cycles} cycles`,
+    attemptHeader: (n, record) => `attempt ${n}  ·  record ${record}`,
+    attemptHeaderShort: (n, record) => `#${n} · ${record}`,
+    goalOn: seconds => `Goal ${seconds} s`,
+    goalOff: 'No goal',
+    goalLine: 'goal',
+    emptyChart: 'each attempt becomes a bar here',
+    legend: ['learner', 'expert', 'goal reached', 'average of 10'],
+    mapAngle: 'angle θ →',
+    mapTitle: 'rule map',
+    mapAngularVelocity: 'ang. velocity ω →',
+    toastGoal: (n, d) => `Goal reached! Attempt ${n} balanced for ${d} s`,
+    toastWall: (n, d) => `Hit the end of the rail · attempt ${n} · ${d} s`,
+    toastFell: (n, d) => `It fell! Attempt ${n} · ${d} s`,
+    footer: 'Space start/pause  ·  R restart  ·  M switch controller  ·  '
+        + '← → push  ·  G goal  ·  T theme  ·  drag the cart or the ball',
+    footerShort: 'Tap the goal to turn it on or off',
+    start: 'Start',
+    pause: 'Pause',
+    restart: 'Restart',
+  },
+};
+
+/**
+ * The language comes from the browser settings (first supported one in the user's list);
+ * anything else falls back to English. "?lang=pt|es|en" in the address forces one.
+ */
+function pickLanguage() {
+  try {
+    const forced = new URLSearchParams(location.search).get('lang');
+    if (forced && STRINGS[forced]) return forced;
+  } catch (e) {
+    // Ignore a malformed address.
+  }
+  const preferred = navigator.languages && navigator.languages.length
+      ? navigator.languages : [navigator.language || 'en'];
+  for (const tag of preferred) {
+    const code = String(tag).toLowerCase().split('-')[0];
+    if (STRINGS[code]) return code;
+  }
+  return 'en';
+}
+
+const LANG = pickLanguage();
+const L = STRINGS[LANG];
+
+/** Puts the chosen language on the static parts of the page. */
+function applyLanguage() {
+  document.documentElement.lang = L.htmlLang;
+  document.title = L.title;
+  document.querySelector('meta[name="description"]').content = L.description;
+  document.getElementById('scene').setAttribute('aria-label', L.sceneLabel);
+  for (const element of document.querySelectorAll('[data-i18n]')) {
+    element.textContent = L[element.dataset.i18n];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Formatting (decimal comma in Portuguese and Spanish, point in English)
 // ---------------------------------------------------------------------------
 
 function num(value, digits) {
-  return value.toFixed(digits).replace('.', ',');
+  return value.toFixed(digits).replace('.', L.decimal);
 }
 
 function signed(value, digits) {
@@ -1257,30 +1493,30 @@ class ModernButton {
 }
 
 // Every input of the sidebar is the same component: a labeled slider (no typing).
-const speedInput = new ValueSlider('Velocidade da simulação', 1, 50, 1, 1,
+const speedInput = new ValueSlider(L.speed, 1, 50, 1, 1,
     v => num(v, 0) + '×', () => T.CYAN, 5, 25);
-const learningRateInput = new ValueSlider('Taxa de aprendizado', 0.1, 3, 0.1, 1,
+const learningRateInput = new ValueSlider(L.learningRate, 0.1, 3, 0.1, 1,
     v => num(v, 1) + '×', () => T.VIOLET, 5, 10);
-const explorationInput = new ValueSlider('Exploração (ruído)', 0, 6, 0.5, 3,
+const explorationInput = new ValueSlider(L.exploration, 0, 6, 0.5, 3,
     v => num(v, 1) + ' N', () => T.VIOLET, 2, 4);
-const initialAngleInput = new ValueSlider('Inclinação inicial', 1, 15, 1, 6,
+const initialAngleInput = new ValueSlider(L.initialAngle, 1, 15, 1, 6,
     v => '±' + num(v, 0) + '°', () => T.TEAL, 1, 5);
-const pushInput = new ValueSlider('Força do empurrão', 0, 10, 0.5, 3,
+const pushInput = new ValueSlider(L.pushStrength, 0, 10, 0.5, 3,
     v => num(v, 1) + ' N', () => T.AMBER, 2, 10);
-const pushChanceInput = new ValueSlider('Chance de empurrão', 0, 100, 5, 0,
-    v => num(v, 0) + '% por s', () => T.AMBER, 2, 10);
-const cartMassInput = new ValueSlider('Massa do carrinho', 0.1, 20, 0.1, 1.1,
+const pushChanceInput = new ValueSlider(L.pushChance, 0, 100, 5, 0,
+    v => num(v, 0) + L.perSecond, () => T.AMBER, 2, 10);
+const cartMassInput = new ValueSlider(L.cartMass, 0.1, 20, 0.1, 1.1,
     v => num(v, 1) + ' kg', () => T.AMBER, 10, 50);
-const poleMassInput = new ValueSlider('Massa da haste', 0.01, 5, 0.01, 0.1,
+const poleMassInput = new ValueSlider(L.poleMass, 0.01, 5, 0.01, 0.1,
     v => num(v, 2) + ' kg', () => T.AMBER, 25, 100);
-const expertSkillInput = new ValueSlider('Habilidade do especialista', 0, 100, 5, 40,
+const expertSkillInput = new ValueSlider(L.expertSkill, 0, 100, 5, 40,
     v => num(v, 0) + '%', () => T.VIOLET, 2, 10);
 const learningInputs = [speedInput, learningRateInput, explorationInput];
 const environmentInputs = [initialAngleInput, pushInput, pushChanceInput, cartMassInput, poleMassInput];
 const allSliders = [expertSkillInput, ...learningInputs, ...environmentInputs];
 
 const btForget = new ModernButton(document.getElementById('btForget'),
-    'Esquecer o que aprendeu', 'reset', () => T.ROSE, false);
+    L.forget, 'reset', () => T.ROSE, false);
 const allButtons = [btForget];
 
 const modeButtons = Array.from(document.querySelectorAll('#modeControl button'));
@@ -1333,8 +1569,8 @@ function updateModeControls() {
     button.style.setProperty('--seg-text', T.dark ? '#041318' : '#FFFFFF');
   });
   document.getElementById('modeDescription').textContent = model.mode === LEARN
-      ? 'Fuzzy + aprendizado por reforço: começa sem saber nada e aprende com cada queda.'
-      : 'Regras fixas da teoria de controle, aplicadas com reflexos humanos.';
+      ? L.learnDescription
+      : L.expertDescription;
   expertSkillInput.element.style.display = model.mode === EXPERT ? '' : 'none';
   if (model.mode === EXPERT) expertSkillInput.paint();
 }
@@ -1374,7 +1610,7 @@ function paintThemeToggle() {
     g.restore();
   }
   document.getElementById('themeToggle').title =
-      T.dark ? 'Mudar para o tema claro (T)' : 'Mudar para o tema escuro (T)';
+      T.dark ? L.toLightTheme : L.toDarkTheme;
 }
 
 function paintLogoCanvas() {
@@ -1922,10 +2158,10 @@ function paintForceArrows(g, bodyLeft, y) {
     const pushY = y - CART_H * 0.62;
     if (push > 0) {
       const end = bodyLeft - 6;
-      paintArrow(g, end - 20 - push * 6, end, pushY, T.AMBER, 'empurrão');
+      paintArrow(g, end - 20 - push * 6, end, pushY, T.AMBER, L.push);
     } else {
       const end = bodyLeft + CART_W + 6;
-      paintArrow(g, end + 20 - push * 6, end, pushY, T.AMBER, 'empurrão');
+      paintArrow(g, end + 20 - push * 6, end, pushY, T.AMBER, L.push);
     }
   }
 }
@@ -2221,18 +2457,18 @@ function paintCard(g, x, y, w, h, title) {
 
 function paintTelemetry(g, card, now) {
   const { x, y, w, h } = card;
-  paintCard(g, x, y, w, h, 'TELEMETRIA');
+  paintCard(g, x, y, w, h, L.telemetry);
 
   let status;
   let color;
   if (model.dragging) {
-    status = 'SEGURANDO';
+    status = L.holding;
     color = T.AMBER;
   } else if (running) {
-    status = 'RODANDO';
+    status = L.running;
     color = T.GREEN;
   } else {
-    status = 'PAUSADO';
+    status = L.paused;
     color = T.MUTED;
   }
   setFont(g, SANS, true, 10, 0.1);
@@ -2251,12 +2487,12 @@ function paintTelemetry(g, card, now) {
   const deg = toDegrees(normalizeAngle(model.theta));
   const narrow = view.narrow;
   const rows = [
-    ['θ', narrow ? 'ângulo' : 'ângulo', signed(deg, 1) + '°'],
-    ['ω', narrow ? 'vel. angular' : 'velocidade angular', signed(toDegrees(model.thetaDot), 1) + '°/s'],
-    ['x', narrow ? 'posição' : 'posição no trilho', signed(model.x, 2) + ' m'],
-    ['v', narrow ? 'velocidade' : 'velocidade do carrinho', signed(model.xDot, 2) + ' m/s'],
-    ['F', narrow ? 'força' : 'força inferida', signed(model.force, 1) + ' N'],
-    ['t', narrow ? 'tempo' : 'tempo equilibrado', num(model.time, 1) + ' s'],
+    ['θ', L.angle, signed(deg, 1) + '°'],
+    ['ω', narrow ? L.angularVelocityShort : L.angularVelocity, signed(toDegrees(model.thetaDot), 1) + '°/s'],
+    ['x', narrow ? L.positionShort : L.position, signed(model.x, 2) + ' m'],
+    ['v', narrow ? L.velocityShort : L.velocity, signed(model.xDot, 2) + ' m/s'],
+    ['F', narrow ? L.forceShort : L.force, signed(model.force, 1) + ' N'],
+    ['t', narrow ? L.timeShort : L.time, num(model.time, 1) + ' s'],
   ];
 
   // Narrow screens: two columns of three rows, so the card stays short.
@@ -2284,7 +2520,7 @@ function paintTelemetry(g, card, now) {
   strokeLine(g, x + 16, lineY, x + w - 16, lineY);
   setFont(g, MONO, false, 10);
   g.fillStyle = rgba(T.MUTED);
-  g.fillText(`laço ${SIMULATION_TICK_MS} ms · ${num(stepsPerSecond, 0)} passos/s · ${compact(loopCount)} ciclos`,
+  g.fillText(L.loop(SIMULATION_TICK_MS, num(stepsPerSecond, 0), compact(loopCount)),
       x + 18, y + h - ui(13));
 }
 
@@ -2295,14 +2531,14 @@ function modeColor(mode) {
 /** Learning card: one bar per attempt (how long the pole stayed up) and the rule map. */
 function paintLearning(g, card) {
   const { x, y, w, h } = card;
-  paintCard(g, x, y, w, h, 'APRENDIZADO');
+  paintCard(g, x, y, w, h, L.learningSection);
   goalToggleBounds = paintGoalToggle(g, model.goalEnabled, x + w - 14, y + ui(10));
   setFont(g, MONO, false, 10.5);
   g.fillStyle = rgba(T.MUTED);
   const titleEnd = x + 18 + ui(110);
-  let header = `tentativa ${model.episode}  ·  recorde ${formatDuration(model.record, true)}`;
+  let header = L.attemptHeader(model.episode, formatDuration(model.record, true));
   const right = goalToggleBounds.x - ui(12);
-  if (right - textWidth(g, header) < titleEnd) header = `nº ${model.episode} · ${formatDuration(model.record, true)}`;
+  if (right - textWidth(g, header) < titleEnd) header = L.attemptHeaderShort(model.episode, formatDuration(model.record, true));
   if (right - textWidth(g, header) >= titleEnd) drawRight(g, header, right, y + ui(25));
 
   const showMap = w >= ui(380);
@@ -2318,7 +2554,7 @@ function paintLearning(g, card) {
 
 /** The goal switch (click or G); returns where it was drawn. */
 function paintGoalToggle(g, enabled, right, top) {
-  const label = enabled ? `Meta ${num(CartPoleModel.EPISODE_GOAL, 0)} s` : 'Sem meta';
+  const label = enabled ? L.goalOn(num(CartPoleModel.EPISODE_GOAL, 0)) : L.goalOff;
   const color = enabled ? T.GREEN : T.MUTED;
   setFont(g, SANS, true, 10);
   const trackW = ui(22);
@@ -2383,7 +2619,7 @@ function paintLearningCurve(g, left, top, right, bottom) {
     g.setLineDash([]);
     setFont(g, SANS, true, 9.5);
     g.fillStyle = rgba(T.GREEN, 200);
-    drawRight(g, 'meta', right, top - 4);
+    drawRight(g, L.goalLine, right, top - 4);
   }
 
   const slots = Math.max(10, Math.trunc((right - left) / ui(5)));
@@ -2395,7 +2631,7 @@ function paintLearningCurve(g, left, top, right, bottom) {
   if (log.length === 0 && model.time < 0.05) {
     setFont(g, SANS, false, 11);
     g.fillStyle = rgba(T.MUTED);
-    const hint = 'cada tentativa vira uma barra aqui';
+    const hint = L.emptyChart;
     g.fillText(hint, (left + right - textWidth(g, hint)) / 2, (top + bottom) / 2);
   }
 
@@ -2444,7 +2680,7 @@ function paintLearningCurve(g, left, top, right, bottom) {
 }
 
 function paintLegend(g, x, maxX, baselineY) {
-  const labels = ['aprendiz', 'especialista', 'meta atingida', 'média de 10'];
+  const labels = L.legend;
   const colors = [T.CYAN, T.VIOLET, T.GREEN, T.TEXT];
   setFont(g, SANS, false, 9.5);
   let cx = x;
@@ -2506,12 +2742,12 @@ function paintRuleMap(g, x, y, size) {
 
   setFont(g, SANS, false, 9.5);
   g.fillStyle = rgba(T.MUTED);
-  g.fillText('ângulo θ →', x, y + size + ui(12));
-  drawRight(g, 'mapa das regras', x + size, y + size + ui(12));
+  g.fillText(L.mapAngle, x, y + size + ui(12));
+  drawRight(g, L.mapTitle, x + size, y + size + ui(12));
   g.save();
   g.translate(x - 5, y + size);
   g.rotate(-Math.PI / 2);
-  g.fillText('vel. angular ω →', 0, 0);
+  g.fillText(L.mapAngularVelocity, 0, 0);
   g.restore();
 }
 
@@ -2522,13 +2758,13 @@ function updateToast(now) {
     const episode = model.lastEndEpisode;
     const duration = model.lastEndDuration;
     if (model.lastEnd === GOAL) {
-      toastText = `Meta atingida! Tentativa ${episode} equilibrou ${num(duration, 0)} s`;
+      toastText = L.toastGoal(episode, num(duration, 0));
       toastColor = T.GREEN;
     } else if (model.lastEnd === HIT_WALL) {
-      toastText = `Bateu no fim do trilho · tentativa ${episode} · ${num(duration, 1)} s`;
+      toastText = L.toastWall(episode, num(duration, 1));
       toastColor = T.AMBER;
     } else {
-      toastText = `Caiu! Tentativa ${episode} · ${num(duration, 1)} s`;
+      toastText = L.toastFell(episode, num(duration, 1));
       toastColor = T.ROSE;
     }
     toastStart = now;
@@ -2561,18 +2797,17 @@ function paintToast(g, w, now) {
 function paintFooter(g, w, h) {
   setFont(g, SANS, false, 10);
   g.fillStyle = rgba(T.MUTED);
-  const full = 'Espaço iniciar/pausar  ·  R reiniciar  ·  M trocar controlador  ·  '
-      + '← → empurrão  ·  G meta  ·  T tema  ·  arraste o carrinho ou a bolinha';
+  const full = L.footer;
   // Phones (no room for the shortcuts) only get the hint about the goal switch.
-  const short = 'Toque na meta para ligar/desligar';
+  const short = L.footerShort;
   const text = textWidth(g, full) <= w - 2 * HUD_MARGIN ? full : short;
   if (textWidth(g, text) <= w - 2 * HUD_MARGIN) g.fillText(text, HUD_MARGIN, h - 12);
 }
 
 /** Start/stop button on the floor, at the left, in line with the push buttons. */
 function paintRunButton(g, track) {
-  const startLabel = 'Iniciar';
-  const stopLabel = 'Pausar';
+  const startLabel = L.start;
+  const stopLabel = L.pause;
   setFont(g, SANS, true, 12);
   const glyph = ui(11);
   const gap = 6;
@@ -2628,7 +2863,7 @@ function paintRunButton(g, track) {
 
 /** Restart button on the floor, right of start/stop: new attempt and empty chart. */
 function paintResetButton(g, x, y, bh) {
-  const label = 'Reiniciar';
+  const label = L.restart;
   setFont(g, SANS, true, 12);
   const glyph = ui(11);
   const gap = 10; // the arrow head sticks out to the right
@@ -2719,10 +2954,10 @@ function paintPushButtons(g, w, track) {
   }
   const first = buttons[0];
   const last = buttons[1];
-  setFont(g, SANS, false, 9.5);
+  setFont(g, SANS, true, 11.5);
   g.fillStyle = rgba(T.MUTED);
-  const text = 'empurrão';
-  g.fillText(text, (first.x + last.x + last.w - textWidth(g, text)) / 2, first.y + first.h + ui(14));
+  const text = L.push;
+  g.fillText(text, (first.x + last.x + last.w - textWidth(g, text)) / 2, first.y + first.h + ui(16));
 }
 
 function pushButtonAt(x, y) {
@@ -2931,6 +3166,7 @@ function placeSpeedSlider() {
   speedInput.paint();
 }
 
+applyLanguage();
 placeHeader();
 buildSidebar();
 placeSpeedSlider();

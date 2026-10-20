@@ -2563,8 +2563,10 @@ function paintFooter(g, w, h) {
   g.fillStyle = rgba(T.MUTED);
   const full = 'Espacio iniciar/pausar  ·  R reiniciar  ·  M cambiar controlador  ·  '
       + '← → empujón  ·  G meta  ·  T tema  ·  arrastra el carrito o la bolita';
-  // Only where the whole list of shortcuts fits (not on phones).
-  if (textWidth(g, full) <= w - 2 * HUD_MARGIN) g.fillText(full, HUD_MARGIN, h - 12);
+  // Phones (no room for the shortcuts) only get the hint about the goal switch.
+  const short = 'Toca la meta para activarla o desactivarla';
+  const text = textWidth(g, full) <= w - 2 * HUD_MARGIN ? full : short;
+  if (textWidth(g, text) <= w - 2 * HUD_MARGIN) g.fillText(text, HUD_MARGIN, h - 12);
 }
 
 /** Start/stop button on the floor, at the left, in line with the push buttons. */
